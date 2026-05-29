@@ -431,10 +431,14 @@ export function findMatchingEvents(events, command) {
       let score = 0;
       const eventDate = new Date(event.startsAt);
       const eventTitle = compact(event.title);
+      const target = command.startsAt ? new Date(command.startsAt) : null;
+
+      if (target && command.hasDate && formatDateKey(eventDate) !== formatDateKey(target)) {
+        return { event, score: 0 };
+      }
 
       if (normalizedTitle && (eventTitle.includes(normalizedTitle) || normalizedTitle.includes(eventTitle))) score += 4;
-      if (command.startsAt) {
-        const target = new Date(command.startsAt);
+      if (target) {
         if (formatDateKey(eventDate) === formatDateKey(target)) score += 3;
         const minuteDiff = Math.abs(eventDate.getTime() - target.getTime()) / 60000;
         if (minuteDiff <= 10) score += 4;

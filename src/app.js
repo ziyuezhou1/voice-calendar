@@ -9,7 +9,7 @@ import {
   normalizeCommand,
   parseVoiceCommand,
   weekRange,
-} from "./calendar-core.js?v=android-speech-1";
+} from "./calendar-core.js?v=delete-confirm-1";
 import { getHoliday, getMonthHolidays, hasHolidayData, HOLIDAY_SOURCE } from "./holiday-data.js";
 import {
   getSpeechAdapterErrorMessage,
@@ -38,6 +38,8 @@ const THEME_ALIASES = [
   [/秋天|秋季|秋/, "autumn"],
   [/冬天|冬季|冬/, "winter"],
 ];
+
+const MAX_DELETE_CANDIDATES = 5;
 
 const elements = {
   micButton: document.querySelector("[data-action='toggle-voice']"),
@@ -99,6 +101,7 @@ let lastVoiceError = "";
 let toastTimer = null;
 let settings = loadSettings();
 let pendingAdd = null;
+let pendingDelete = null;
 
 init();
 
@@ -666,6 +669,8 @@ function handleCommand(rawText) {
   }
 
   const theme = parseThemeCommand(text);
+  if (pendingDelete && handlePendingDeleteReply(text, theme)) return;
+
   if (pendingAdd) {
     if (isPendingCancel(text)) {
       cancelPendingAdd();
@@ -854,16 +859,153 @@ function handleDelete(command) {
     return;
   }
 
-  const target = matches[0];
+  startPendingDelete(matches, command.rawText);
+}
+
+function handlePendingDeleteReply(text, theme) {
+  if (isPendingCancel(text) || isDeleteRejection(text)) {
+    cancelPendingDelete();
+    return true;
+  }
+
+  const selectedNumber = parseDeleteSelection(text);
+  if (selectedNumber !== null) {
+    if (selectedNumber < 1 || selectedNumber > pendingDelete.matches.length) {
+      const message = `我只列出了 ${pendingDelete.matches.length} 条候选日程，请说 1 到 ${pendingDelete.matches.length} 之间的序号，或说取消。`;
+      logAssistant(message, "warning");
+      speak(message);
+      return true;
+    }
+    confirmPendingDelete(selectedNumber - 1);
+    return true;
+  }
+
+  if (isDeleteConfirmation(text)) {
+    if (pendingDelete.matches.length === 1) {
+      confirmPendingDelete(0);
+      return true;
+    }
+    askPendingDeleteSelection();
+    return true;
+  }
+
+  const command = parseVoiceCommand(text, { now: new Date() });
+  if (theme || command.intent === "add" || command.intent === "delete" || command.intent === "list") {
+    pendingDelete = null;
+    logAssistant("已结束上一次待确认删除。", "info");
+    return false;
+  }
+
+  askPendingDeleteSelection();
+  return true;
+}
+
+function startPendingDelete(matches, sourceText = "") {
+  pendingAdd = null;
+  const candidates = matches.slice(0, MAX_DELETE_CANDIDATES);
+  pendingDelete = { matches: candidates, total: matches.length, sourceText };
+
+  const message = getDeleteConfirmationMessage(candidates, matches.length);
+  elements.voiceStatus.textContent = candidates.length === 1 ? "等待确认删除" : "等待选择要删除的日程";
+  logAssistant(message, "warning");
+  speak(message);
+}
+
+function getDeleteConfirmationMessage(candidates, total) {
+  if (candidates.length === 1) {
+    return `我找到 1 条匹配日程：${formatDeleteCandidate(candidates[0])}。确认删除吗？可以说“确认删除”或“取消”。`;
+  }
+
+  const list = candidates.map((event, index) => `${index + 1}. ${formatDeleteCandidate(event)}`).join("；");
+  const omitted = total > candidates.length ? `还有 ${total - candidates.length} 条未列出，我先展示最相关的 ${candidates.length} 条。` : "";
+  return `我找到了 ${total} 条相似日程：${list}。${omitted}你要删除第几个？`;
+}
+
+function askPendingDeleteSelection() {
+  const message =
+    pendingDelete.matches.length === 1
+      ? "请说“确认删除”来删除这条日程，或说“取消”。"
+      : `请说要删除第几个，例如“第 1 个”，或说“取消”。`;
+  logAssistant(message, "warning");
+  speak(message);
+}
+
+function confirmPendingDelete(index) {
+  const target = pendingDelete?.matches[index];
+  pendingDelete = null;
+
+  if (!target || !events.some((event) => event.id === target.id)) {
+    const message = "这条待删除日程已经不存在，我没有继续删除。";
+    logAssistant(message, "warning");
+    speak(message);
+    render();
+    return;
+  }
+
+  deleteEvent(target);
+}
+
+function cancelPendingDelete() {
+  pendingDelete = null;
+  const message = "好的，已取消删除。";
+  elements.voiceStatus.textContent = "待命中";
+  logAssistant(message, "info");
+  speak(message);
+}
+
+function deleteEvent(target) {
   events = events.filter((event) => event.id !== target.id);
   saveEvents();
   render();
 
-  const extra = matches.length > 1 ? `另外还有 ${matches.length - 1} 条相似日程未删除。` : "";
-  const message = `已删除：${target.title}，${formatDateTime(target.startsAt)}。${extra}`;
+  const message = `已删除：${target.title}，${formatDateTime(target.startsAt)}。`;
   logAssistant(message, "success");
   showToast(message);
   speak(message);
+}
+
+function formatDeleteCandidate(event) {
+  return `${formatDateTime(event.startsAt)} ${event.title}`;
+}
+
+function isDeleteConfirmation(text) {
+  const normalized = normalizeCommand(text).replace(/\s+/g, "");
+  return /^(确认|确认删除|确定|确定删除|是|对|好|好的|可以|删除|删掉|删吧|删除吧)$/.test(normalized);
+}
+
+function isDeleteRejection(text) {
+  const normalized = normalizeCommand(text).replace(/\s+/g, "");
+  return /^(不删|别删|不要删|先不删|否|不是)$/.test(normalized);
+}
+
+function parseDeleteSelection(text) {
+  const normalized = normalizeCommand(text).replace(/\s+/g, "");
+  let token = null;
+
+  if (/^(\d+|[一二两三四五六七八九十]+)$/.test(normalized)) {
+    token = normalized;
+  } else {
+    token =
+      normalized.match(/第(\d+|[一二两三四五六七八九十]+)(?:个|条|项)?/)?.[1] ||
+      normalized.match(/(?:删除|删掉|选|选择|确认删除)(?:第)?(\d+|[一二两三四五六七八九十]+)(?:个|条|项)?/)?.[1] ||
+      null;
+  }
+
+  if (!token) return null;
+  const number = parseSmallNumber(token);
+  return Number.isFinite(number) ? number : null;
+}
+
+function parseSmallNumber(value) {
+  if (/^\d+$/.test(value)) return Number(value);
+  if (value === "十") return 10;
+  const digitMap = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+  if (Object.prototype.hasOwnProperty.call(digitMap, value)) return digitMap[value];
+  const teen = value.match(/^十([一二三四五六七八九])$/);
+  if (teen) return 10 + digitMap[teen[1]];
+  const tens = value.match(/^([一二两三四五六七八九])十([一二三四五六七八九])?$/);
+  if (tens) return digitMap[tens[1]] * 10 + (tens[2] ? digitMap[tens[2]] : 0);
+  return NaN;
 }
 
 function handleList(command) {
@@ -885,12 +1027,7 @@ function handleEventListClick(event) {
   const target = events.find((item) => item.id === button.dataset.eventId);
   if (!target) return;
 
-  events = events.filter((item) => item.id !== target.id);
-  saveEvents();
-  render();
-  const message = `已删除：${target.title}。`;
-  logAssistant(message, "success");
-  speak(message);
+  startPendingDelete([target], `点击删除 ${target.title}`);
 }
 
 function handleCalendarClick(event) {
