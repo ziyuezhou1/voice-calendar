@@ -32,7 +32,7 @@ npm run cap:sync
 npm run android:open
 ```
 
-在 Android Studio 中选择真机运行。首次启动时允许麦克风权限，然后点击“开始语音”测试中文日程命令。
+在 Android Studio 中选择真机运行。首次点击“开始语音”时允许麦克风权限，然后继续测试中文日程命令。
 
 ## GitHub Release
 
