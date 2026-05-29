@@ -10,6 +10,13 @@ import {
   parseVoiceCommand,
   weekRange,
 } from "./calendar-core.js?v=android-speech-1";
+import {
+  ACCOUNT_PROVIDERS,
+  createAccountSession,
+  getAccountEventsKey,
+  getAccountLabel,
+  getProviderLabel,
+} from "./account-core.js?v=account-login-1";
 import { getHoliday, getMonthHolidays, hasHolidayData, HOLIDAY_SOURCE } from "./holiday-data.js";
 import {
   getSpeechAdapterErrorMessage,
@@ -20,6 +27,7 @@ import {
 
 const STORE_KEY = "voice-calendar-events-v1";
 const SETTINGS_KEY = "voice-calendar-settings-v1";
+const AUTH_SESSION_KEY = "voice-calendar-auth-session-v1";
 
 const THEMES = {
   light: "浅色",
@@ -40,6 +48,15 @@ const THEME_ALIASES = [
 ];
 
 const elements = {
+  accountButton: document.querySelector("[data-action='open-account-panel']"),
+  accountName: document.querySelector("#account-name"),
+  accountAvatar: document.querySelector("#account-avatar"),
+  accountModal: document.querySelector("#account-modal"),
+  accountCloseButton: document.querySelector("[data-action='close-account-panel']"),
+  accountProviderButtons: document.querySelectorAll("[data-provider-option]"),
+  accountIdentity: document.querySelector("#account-identity"),
+  confirmAccountLoginButton: document.querySelector("[data-action='confirm-account-login']"),
+  logoutAccountButton: document.querySelector("[data-action='logout-account']"),
   micButton: document.querySelector("[data-action='toggle-voice']"),
   runButton: document.querySelector("[data-action='run-command']"),
   notificationButton: document.querySelector("[data-action='enable-notifications']"),
@@ -76,6 +93,8 @@ const examples = [
   "切换到春天主题",
 ];
 
+let account = loadAccountSession();
+let selectedAccountProvider = account?.provider || "google";
 let events = loadEvents();
 let activeRange = dayRange(new Date(), "今天");
 let calendarCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
@@ -108,12 +127,29 @@ function init() {
   renderExamples();
   bindEvents();
   applyTheme(settings.theme || "light", { persist: false });
+  updateAccountUI();
   render();
   scheduleReminderChecks();
   logAssistant("可以直接说：添加明天下午三点团队周会，提前二十分钟提醒我。信息不完整时，我会继续追问。", "hint");
 }
 
 function bindEvents() {
+  elements.accountButton.addEventListener("click", openAccountPanel);
+  elements.accountCloseButton.addEventListener("click", closeAccountPanel);
+  elements.accountModal.addEventListener("click", (event) => {
+    if (event.target === elements.accountModal) closeAccountPanel();
+  });
+  elements.accountProviderButtons.forEach((button) => {
+    button.addEventListener("click", () => selectAccountProvider(button.dataset.providerOption));
+  });
+  elements.confirmAccountLoginButton.addEventListener("click", confirmAccountLogin);
+  elements.logoutAccountButton.addEventListener("click", logoutAccount);
+  elements.accountIdentity.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      confirmAccountLogin();
+    }
+  });
   elements.micButton.addEventListener("click", toggleVoice);
   elements.runButton.addEventListener("click", () => handleCommand(elements.transcript.value));
   elements.clearButton.addEventListener("click", () => {
@@ -127,7 +163,10 @@ function bindEvents() {
     if (!(event.target instanceof Element) || !event.target.closest(".theme-switcher")) closeThemeMenu();
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") closeThemeMenu();
+    if (event.key === "Escape") {
+      closeThemeMenu();
+      closeAccountPanel();
+    }
   });
   elements.transcript.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -143,6 +182,94 @@ function bindEvents() {
   document.querySelector("[data-action='previous-month']").addEventListener("click", () => moveCalendarMonth(-1));
   document.querySelector("[data-action='next-month']").addEventListener("click", () => moveCalendarMonth(1));
   document.querySelector("[data-action='go-today']").addEventListener("click", goToday);
+}
+
+function openAccountPanel() {
+  selectAccountProvider(selectedAccountProvider);
+  elements.accountIdentity.value = account?.displayName || "";
+  elements.accountModal.hidden = false;
+  window.setTimeout(() => elements.accountIdentity.focus(), 0);
+}
+
+function closeAccountPanel() {
+  elements.accountModal.hidden = true;
+}
+
+function selectAccountProvider(provider) {
+  selectedAccountProvider = Object.prototype.hasOwnProperty.call(ACCOUNT_PROVIDERS, provider) ? provider : "google";
+  const providerConfig = ACCOUNT_PROVIDERS[selectedAccountProvider];
+  elements.accountIdentity.placeholder = providerConfig.placeholder;
+  elements.accountProviderButtons.forEach((button) => {
+    const active = button.dataset.providerOption === selectedAccountProvider;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+}
+
+function confirmAccountLogin() {
+  let nextAccount;
+  try {
+    nextAccount = createAccountSession(selectedAccountProvider, elements.accountIdentity.value);
+  } catch {
+    const message = `请输入${getProviderLabel(selectedAccountProvider)}账号标识。`;
+    logAssistant(message, "warning");
+    showToast(message);
+    return;
+  }
+
+  const previousAccount = account;
+  const previousEvents = events;
+  account = nextAccount;
+  saveAccountSession();
+
+  const accountKey = getEventsStorageKey(account);
+  const hasAccountEvents = localStorage.getItem(accountKey) !== null;
+  events = hasAccountEvents ? loadEvents(account) : !previousAccount && previousEvents.length ? previousEvents : [];
+  if (!hasAccountEvents && events.length) saveEvents();
+
+  pendingAdd = null;
+  activeRange = dayRange(new Date(), "今天");
+  calendarCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+  updateAccountUI();
+  render();
+  closeAccountPanel();
+
+  const message = `已登录${getAccountLabel(account)}，已加载 ${events.length} 条日程。`;
+  logAssistant(message, "success");
+  showToast(message);
+}
+
+function logoutAccount() {
+  if (!account) {
+    closeAccountPanel();
+    return;
+  }
+
+  saveEvents();
+  clearAccountSession();
+  account = null;
+  selectedAccountProvider = "google";
+  events = loadEvents();
+  pendingAdd = null;
+  activeRange = dayRange(new Date(), "今天");
+  calendarCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+  updateAccountUI();
+  render();
+  closeAccountPanel();
+
+  const message = `已退出登录，当前为访客日程，共 ${events.length} 条。`;
+  logAssistant(message, "info");
+  showToast(message);
+}
+
+function updateAccountUI() {
+  const label = getAccountLabel(account);
+  const provider = account ? ACCOUNT_PROVIDERS[account.provider] : null;
+  elements.accountName.textContent = label;
+  elements.accountAvatar.textContent = provider?.avatar || "访";
+  elements.accountButton.title = account ? `当前账号：${label}` : "登录账号";
+  elements.accountButton.setAttribute("aria-label", account ? `当前账号：${label}` : "登录账号");
+  elements.logoutAccountButton.disabled = !account;
 }
 
 function setupSpeechRecognition() {
@@ -1157,9 +1284,13 @@ function pulseVoiceMeter() {
   );
 }
 
-function loadEvents() {
+function getEventsStorageKey(session = account) {
+  return getAccountEventsKey(STORE_KEY, session);
+}
+
+function loadEvents(session = account) {
   try {
-    const parsed = JSON.parse(localStorage.getItem(STORE_KEY) || "[]");
+    const parsed = JSON.parse(localStorage.getItem(getEventsStorageKey(session)) || "[]");
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
@@ -1168,9 +1299,36 @@ function loadEvents() {
 
 function saveEvents() {
   try {
-    localStorage.setItem(STORE_KEY, JSON.stringify(events));
+    localStorage.setItem(getEventsStorageKey(), JSON.stringify(events));
   } catch {
     logAssistant("浏览器暂时无法写入本地日程，当前页面仍可继续使用。", "warning");
+  }
+}
+
+function loadAccountSession() {
+  try {
+    const session = JSON.parse(localStorage.getItem(AUTH_SESSION_KEY) || "null");
+    if (!session?.provider || !session?.accountId || !session?.displayName) return null;
+    if (!Object.prototype.hasOwnProperty.call(ACCOUNT_PROVIDERS, session.provider)) return null;
+    return session;
+  } catch {
+    return null;
+  }
+}
+
+function saveAccountSession() {
+  try {
+    localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(account));
+  } catch {
+    logAssistant("浏览器暂时无法保存登录状态，本次仍可继续使用。", "warning");
+  }
+}
+
+function clearAccountSession() {
+  try {
+    localStorage.removeItem(AUTH_SESSION_KEY);
+  } catch {
+    logAssistant("浏览器暂时无法清除登录状态，可刷新后重试。", "warning");
   }
 }
 
