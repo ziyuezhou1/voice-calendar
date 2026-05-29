@@ -1,0 +1,13 @@
+{
+  "name": "voice-calendar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A voice-first calendar tool for adding, deleting, querying and reminding events in Chinese.",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node tests/calendar-core.test.mjs"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

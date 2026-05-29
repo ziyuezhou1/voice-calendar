@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>声历 Voice Calendar</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <div>
+            <h1>声历</h1>
+            <p>Voice Calendar</p>
+          </div>
+        </div>
+
+        <nav class="top-actions" aria-label="全局操作">
+          <button class="icon-button" type="button" data-action="enable-notifications" aria-label="开启系统通知" title="开启系统通知">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 22a2.4 2.4 0 0 0 2.3-1.8H9.7A2.4 2.4 0 0 0 12 22Zm7-6V11a7 7 0 0 0-5-6.7V3a2 2 0 0 0-4 0v1.3A7 7 0 0 0 5 11v5l-2 2v1h18v-1l-2-2Z"></path>
+            </svg>
+          </button>
+        </nav>
+      </header>
+
+      <main class="workspace">
+        <section class="voice-panel" aria-labelledby="voice-title">
+          <div class="panel-heading">
+            <div>
+              <span class="eyebrow">语音中枢</span>
+              <h2 id="voice-title">说一句，日程就位</h2>
+            </div>
+            <span class="status-pill" id="support-status">检测语音能力中</span>
+          </div>
+
+          <div class="voice-console">
+            <button class="mic-button" type="button" data-action="toggle-voice" aria-label="开始或停止语音识别" aria-pressed="false">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 15a4 4 0 0 0 4-4V7a4 4 0 0 0-8 0v4a4 4 0 0 0 4 4Zm7-4a7 7 0 0 1-6 6.9V21h-2v-3.1A7 7 0 0 1 5 11h2a5 5 0 0 0 10 0h2Z"></path>
+              </svg>
+              <span>开始语音</span>
+            </button>
+            <div class="voice-meter" id="voice-meter" aria-hidden="true">
+              <span></span><span></span><span></span><span></span><span></span>
+            </div>
+            <p id="voice-status">待命中</p>
+          </div>
+
+          <label class="transcript-box" for="transcript">
+            <span>识别文本</span>
+            <textarea id="transcript" rows="3" data-testid="command-input" placeholder="添加明天下午三点团队周会，提前二十分钟提醒我"></textarea>
+          </label>
+
+          <div class="command-actions">
+            <button class="primary-button" type="button" data-action="run-command" data-testid="run-command">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m4 4 17 8-17 8 3-8-3-8Zm4.2 7 6.8 1-6.8 1-.9 2.5L14.8 12 7.3 8.5 8.2 11Z"></path>
+              </svg>
+              执行
+            </button>
+            <button class="secondary-button" type="button" data-action="clear-transcript">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M6.4 5 5 6.4 10.6 12 5 17.6 6.4 19l5.6-5.6 5.6 5.6 1.4-1.4-5.6-5.6L19 6.4 17.6 5 12 10.6 6.4 5Z"></path>
+              </svg>
+              清空
+            </button>
+          </div>
+
+          <div class="example-strip" id="examples" aria-label="语音指令"></div>
+        </section>
+
+        <section class="overview-panel" aria-label="日程概览">
+          <div class="stats-grid" id="stats"></div>
+          <div class="today-block">
+            <div class="panel-heading compact">
+              <div>
+                <span class="eyebrow">今日</span>
+                <h2>接下来</h2>
+              </div>
+            </div>
+            <div class="today-list" id="today-list" data-testid="today-list"></div>
+          </div>
+        </section>
+
+        <section class="calendar-panel" aria-label="月历">
+          <div class="panel-heading compact">
+            <div>
+              <span class="eyebrow">月历</span>
+              <h2>按日期查看</h2>
+            </div>
+          </div>
+          <div class="calendar-grid" id="calendar-grid"></div>
+        </section>
+
+        <section class="agenda-panel" aria-labelledby="range-label">
+          <div class="panel-heading compact">
+            <div>
+              <span class="eyebrow">列表</span>
+              <h2 id="range-label">今天日程</h2>
+            </div>
+          </div>
+          <div class="event-list" id="event-list" data-testid="event-list"></div>
+        </section>
+
+        <aside class="log-panel" aria-label="语音助手记录">
+          <div class="panel-heading compact">
+            <div>
+              <span class="eyebrow">助手</span>
+              <h2>反馈</h2>
+            </div>
+          </div>
+          <ol class="assistant-log" id="assistant-log"></ol>
+        </aside>
+      </main>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>
