@@ -9,7 +9,7 @@ import {
   normalizeCommand,
   parseVoiceCommand,
   weekRange,
-} from "./calendar-core.js?v=voice-start-2";
+} from "./calendar-core.js?v=voice-start-3";
 import { getHoliday, getMonthHolidays, hasHolidayData, HOLIDAY_SOURCE } from "./holiday-data.js";
 
 const STORE_KEY = "voice-calendar-events-v1";
@@ -83,6 +83,8 @@ let quickAbortRetries = 0;
 let retryAfterRecognitionEnd = false;
 let recognitionRestartTimer = null;
 let voiceStopRequested = false;
+let microphonePermissionState = "unknown";
+let microphonePermissionRequesting = false;
 let lastVoiceError = "";
 let toastTimer = null;
 let settings = loadSettings();
@@ -136,8 +138,50 @@ function bindEvents() {
 function setupSpeechRecognition() {
   SpeechRecognitionConstructor = window.SpeechRecognition || window.webkitSpeechRecognition;
   const speechSupported = Boolean(SpeechRecognitionConstructor);
-  elements.supportStatus.textContent = speechSupported ? "浏览器语音识别已就绪" : "当前浏览器不支持语音识别，可使用文字命令";
+  updateSpeechSupportStatus();
   elements.micButton.disabled = !speechSupported;
+  updateMicButtonLabel();
+  if (speechSupported) refreshMicrophonePermissionStatus();
+}
+
+async function refreshMicrophonePermissionStatus() {
+  if (!navigator.permissions?.query) return;
+
+  try {
+    const permission = await navigator.permissions.query({ name: "microphone" });
+    microphonePermissionState = permission.state;
+    updateSpeechSupportStatus();
+    updateMicButtonLabel();
+
+    permission.addEventListener?.("change", () => {
+      microphonePermissionState = permission.state;
+      updateSpeechSupportStatus();
+      updateMicButtonLabel();
+    });
+  } catch {
+    microphonePermissionState = "unknown";
+    updateSpeechSupportStatus();
+  }
+}
+
+function updateSpeechSupportStatus() {
+  if (!SpeechRecognitionConstructor) {
+    elements.supportStatus.textContent = "当前浏览器不支持语音识别，可使用文字命令";
+    return;
+  }
+
+  if (microphonePermissionRequesting) {
+    elements.supportStatus.textContent = "正在请求麦克风权限";
+    return;
+  }
+
+  const labels = {
+    granted: "语音识别和麦克风已就绪",
+    denied: "麦克风权限被浏览器阻止",
+    prompt: "语音识别可用，需授权麦克风",
+    unknown: "语音识别可用，需授权麦克风",
+  };
+  elements.supportStatus.textContent = labels[microphonePermissionState] || labels.unknown;
 }
 
 function createSpeechRecognitionSession() {
@@ -217,6 +261,11 @@ function createSpeechRecognitionSession() {
       return;
     }
 
+    if (event.error === "not-allowed") {
+      microphonePermissionState = "denied";
+      updateSpeechSupportStatus();
+    }
+
     voiceStarting = false;
     listening = false;
     document.body.dataset.listening = "false";
@@ -263,6 +312,7 @@ function createSpeechRecognitionSession() {
 
 function toggleVoice() {
   if (!SpeechRecognitionConstructor) return;
+  if (microphonePermissionRequesting) return;
   if (listening || voiceStarting) {
     stopRecognitionSession();
     return;
@@ -276,7 +326,64 @@ function toggleVoice() {
     return;
   }
 
+  if (shouldRequestMicrophonePermissionBeforeRecognition()) {
+    requestMicrophonePermission();
+    return;
+  }
+
   startRecognitionSession();
+}
+
+function shouldRequestMicrophonePermissionBeforeRecognition() {
+  return Boolean(navigator.mediaDevices?.getUserMedia) && microphonePermissionState !== "granted";
+}
+
+async function requestMicrophonePermission() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    startRecognitionSession();
+    return;
+  }
+
+  if (microphonePermissionState === "denied") {
+    const message = "麦克风权限已被浏览器阻止。请点地址栏左侧的站点设置，允许麦克风后刷新页面。";
+    lastVoiceError = message;
+    elements.voiceStatus.textContent = message;
+    logAssistant(message, "warning");
+    updateSpeechSupportStatus();
+    updateMicButtonLabel();
+    return;
+  }
+
+  microphonePermissionRequesting = true;
+  updateSpeechSupportStatus();
+  updateMicButtonLabel();
+  elements.voiceStatus.textContent = "正在请求麦克风权限，请在浏览器弹窗中选择允许";
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+      },
+    });
+    stream.getTracks().forEach((track) => track.stop());
+    microphonePermissionState = "granted";
+    lastVoiceError = "";
+    const message = "麦克风权限已开启，请再次点击开始语音。";
+    elements.voiceStatus.textContent = message;
+    logAssistant(message, "success");
+    showToast(message);
+  } catch (error) {
+    microphonePermissionState = error?.name === "NotAllowedError" || error?.name === "PermissionDeniedError" ? "denied" : "unknown";
+    const message = getMicrophonePermissionErrorMessage(error);
+    lastVoiceError = message;
+    elements.voiceStatus.textContent = message;
+    logAssistant(message, "warning");
+  } finally {
+    microphonePermissionRequesting = false;
+    updateSpeechSupportStatus();
+    updateMicButtonLabel();
+  }
 }
 
 function startRecognitionSession({ isRetry = false } = {}) {
@@ -310,6 +417,10 @@ function startRecognitionSession({ isRetry = false } = {}) {
     recognition = null;
     voiceStarting = false;
     const message = getStartErrorMessage(error);
+    if (error?.name === "NotAllowedError" || error?.name === "PermissionDeniedError") {
+      microphonePermissionState = "denied";
+      updateSpeechSupportStatus();
+    }
     lastVoiceError = message;
     listening = false;
     document.body.dataset.listening = "false";
@@ -357,20 +468,40 @@ function shouldRetryQuickAbort(errorCode, elapsedMs) {
   return errorCode === "aborted" && elapsedMs < 1500 && quickAbortRetries < 1;
 }
 
+function getMicrophonePermissionErrorMessage(error) {
+  const name = error?.name || "";
+  if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+    return "麦克风权限未开启。请在浏览器地址栏或站点设置里允许麦克风，然后刷新页面再试。";
+  }
+  if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+    return "没有找到可用麦克风。请检查系统输入设备后再试。";
+  }
+  if (name === "NotReadableError" || name === "TrackStartError") {
+    return "麦克风正在被其他应用占用。请关闭占用麦克风的应用后再试。";
+  }
+  if (name === "SecurityError") {
+    return "浏览器出于安全策略阻止了麦克风访问。请确认当前页面使用 HTTPS 打开。";
+  }
+  return `麦克风授权失败：${name || "未知错误"}。可先使用文字命令。`;
+}
+
 function getStartErrorMessage(error) {
   const name = error?.name || error?.message || "";
   if (name === "InvalidStateError") return "语音识别已经在启动中，请稍等一秒再试。";
-  if (name === "NotAllowedError" || name === "PermissionDeniedError") return "麦克风权限未开启。请在浏览器地址栏允许麦克风后再点开始语音。";
+  if (name === "NotAllowedError" || name === "PermissionDeniedError") return "麦克风权限未开启。请在浏览器地址栏或站点设置里允许麦克风后再点开始语音。";
   return `语音识别启动失败：${name || "未知错误"}。可先使用文字命令。`;
 }
 
 function getRecognitionErrorMessage(errorCode, elapsedMs = 0) {
   if (errorCode === "aborted" && elapsedMs < 1500) {
+    if (microphonePermissionState === "granted") {
+      return "麦克风权限已开启，但浏览器语音服务刚启动就中止了。请刷新页面再试；如果仍失败，可先使用文字命令。";
+    }
     return "语音识别刚启动就被浏览器中止。请确认已允许麦克风权限；如果在微信、系统内置浏览器或不稳定的移动端浏览器中打开，请换 Chrome 后再试，也可以先使用文字命令。";
   }
 
   const messages = {
-    "not-allowed": "麦克风权限未开启。请在浏览器地址栏允许麦克风后再点开始语音。",
+    "not-allowed": "麦克风权限未开启。请在浏览器地址栏或站点设置里允许麦克风后再点开始语音。",
     "service-not-allowed": "浏览器语音识别服务被禁用，可先使用文字命令。",
     "audio-capture": "没有采集到麦克风音频。请检查系统麦克风、浏览器权限和输入设备。",
     network: "浏览器语音识别服务连接失败。Chrome 的语音识别可能需要联网，可先使用文字命令。",
@@ -383,7 +514,16 @@ function getRecognitionErrorMessage(errorCode, elapsedMs = 0) {
 
 function updateMicButtonLabel() {
   const label = elements.micButton.querySelector("span");
-  if (label) label.textContent = listening || voiceStarting ? "停止语音" : "开始语音";
+  if (!label) return;
+  if (microphonePermissionRequesting) {
+    label.textContent = "授权中";
+    return;
+  }
+  if (listening || voiceStarting) {
+    label.textContent = "停止语音";
+    return;
+  }
+  label.textContent = shouldRequestMicrophonePermissionBeforeRecognition() ? "授权麦克风" : "开始语音";
 }
 
 function handleCommand(rawText) {
