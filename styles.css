@@ -878,6 +878,11 @@ body[data-listening="true"] .voice-meter span:nth-child(5) {
   background: color-mix(in srgb, var(--amber) 9%, var(--control));
 }
 
+.calendar-day.international:not(.holiday):not(.workday) {
+  border-color: rgba(47, 107, 216, 0.34);
+  background: color-mix(in srgb, var(--blue) 8%, var(--control));
+}
+
 .calendar-day.active {
   color: var(--on-accent);
   background: var(--teal);
@@ -917,8 +922,12 @@ body[data-listening="true"] .voice-meter span:nth-child(5) {
   line-height: 1;
 }
 
-.calendar-day.workday .holiday-badge {
+.holiday-badge.workday {
   background: var(--amber);
+}
+
+.holiday-badge.international {
+  background: var(--blue);
 }
 
 .calendar-day em {
@@ -966,6 +975,10 @@ body[data-listening="true"] .voice-meter span:nth-child(5) {
   background: var(--amber);
 }
 
+.holiday-dot.international {
+  background: var(--blue);
+}
+
 .month-holidays {
   margin-top: 10px;
 }
@@ -999,6 +1012,11 @@ body[data-listening="true"] .voice-meter span:nth-child(5) {
 
 .month-holidays li.workday span {
   color: var(--amber);
+  font-weight: 800;
+}
+
+.month-holidays li.international span {
+  color: var(--blue);
   font-weight: 800;
 }
 
