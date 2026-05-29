@@ -13,6 +13,7 @@
 | 7 | feat: 增加年月选择和节假日标注 | 月历年月选择、上/下月切换、2026 法定节假日和调休标记 | 切换到 2026 年 10 月，检查国庆“休”和 10 月 10 日“班” |
 | 8 | feat: 增加添加日程多轮追问 | 缺日期、时间或事项名称时追问补齐后再创建 | 输入“帮我加个明天下午开会”，再输入“三点” |
 | 9 | feat: 增加 Android 原生语音识别 App | Capacitor Android 工程、语音 adapter、GitHub Release workflow | `npm test`、`npm run cap:sync`、GitHub Actions 构建 APK |
-| 10 | docs: 补充依赖和原创说明 | `README.md`、PR 模板 | 检查 README 与 PR 描述完整性 |
+| 10 | docs: 增加用户调研与设计说明 | `docs/user-research.md`、README 入口 | 检查用户画像和需求功能映射完整性 |
+| 11 | docs: 补充依赖和原创说明 | `README.md`、PR 模板 | 检查 README 与 PR 描述完整性 |
 
 注意：不要伪造历史提交时间。所有 commit 应在参赛批次开始与截止时间之间自然产生。
