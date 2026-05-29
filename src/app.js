@@ -9,7 +9,7 @@ import {
   normalizeCommand,
   parseVoiceCommand,
   weekRange,
-} from "./calendar-core.js?v=calendar-nav-1";
+} from "./calendar-core.js?v=voice-capture-1";
 import { getHoliday, getMonthHolidays, hasHolidayData, HOLIDAY_SOURCE } from "./holiday-data.js";
 
 const STORE_KEY = "voice-calendar-events-v1";
@@ -74,6 +74,7 @@ let activeRange = dayRange(new Date(), "今天");
 let calendarCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 let recognition = null;
 let listening = false;
+let lastVoiceError = "";
 let toastTimer = null;
 let settings = loadSettings();
 
@@ -125,7 +126,12 @@ function bindEvents() {
 function setupSpeechRecognition() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   const speechSupported = Boolean(SpeechRecognition);
-  elements.supportStatus.textContent = speechSupported ? "浏览器语音识别已就绪" : "当前浏览器不支持语音识别，可使用文字命令";
+  const microphoneSupported = Boolean(navigator.mediaDevices?.getUserMedia);
+  elements.supportStatus.textContent = speechSupported
+    ? microphoneSupported
+      ? "浏览器语音识别已就绪"
+      : "浏览器可识别语音，但无法预检麦克风"
+    : "当前浏览器不支持语音识别，可使用文字命令";
   elements.micButton.disabled = !speechSupported;
 
   if (!speechSupported) return;
@@ -138,9 +144,30 @@ function setupSpeechRecognition() {
 
   recognition.addEventListener("start", () => {
     listening = true;
+    lastVoiceError = "";
     document.body.dataset.listening = "true";
     elements.voiceStatus.textContent = "正在听，请说出日程命令";
     elements.micButton.setAttribute("aria-pressed", "true");
+    updateMicButtonLabel();
+  });
+
+  recognition.addEventListener("audiostart", () => {
+    elements.voiceStatus.textContent = "麦克风已接通，正在收音";
+    pulseVoiceMeter();
+  });
+
+  recognition.addEventListener("soundstart", () => {
+    elements.voiceStatus.textContent = "检测到声音，正在识别";
+    pulseVoiceMeter();
+  });
+
+  recognition.addEventListener("speechstart", () => {
+    elements.voiceStatus.textContent = "检测到语音，请继续说";
+    pulseVoiceMeter();
+  });
+
+  recognition.addEventListener("speechend", () => {
+    elements.voiceStatus.textContent = "已收到语音，正在转成文字";
   });
 
   recognition.addEventListener("result", (event) => {
@@ -152,6 +179,7 @@ function setupSpeechRecognition() {
     pulseVoiceMeter();
 
     const lastResult = event.results[event.results.length - 1];
+    elements.voiceStatus.textContent = lastResult?.isFinal ? "识别完成，正在执行" : "正在识别语音";
     if (lastResult?.isFinal) handleCommand(elements.transcript.value);
   });
 
@@ -159,7 +187,9 @@ function setupSpeechRecognition() {
     listening = false;
     document.body.dataset.listening = "false";
     elements.micButton.setAttribute("aria-pressed", "false");
-    const message = event.error === "not-allowed" ? "麦克风权限未开启，可先使用文字命令。" : "这次没听清，可以再试一次。";
+    updateMicButtonLabel();
+    const message = getRecognitionErrorMessage(event.error);
+    lastVoiceError = message;
     elements.voiceStatus.textContent = message;
     logAssistant(message, "warning");
   });
@@ -168,18 +198,81 @@ function setupSpeechRecognition() {
     listening = false;
     document.body.dataset.listening = "false";
     elements.micButton.setAttribute("aria-pressed", "false");
-    elements.voiceStatus.textContent = "待命中";
+    updateMicButtonLabel();
+    if (!lastVoiceError) {
+      elements.voiceStatus.textContent = elements.transcript.value.trim() ? "待命中" : "语音识别已结束，可再次点击开始语音";
+    }
   });
 }
 
-function toggleVoice() {
+async function toggleVoice() {
   if (!recognition) return;
   if (listening) {
     recognition.stop();
     return;
   }
-  elements.transcript.value = "";
-  recognition.start();
+
+  try {
+    elements.micButton.disabled = true;
+    elements.voiceStatus.textContent = "正在请求麦克风权限";
+    await ensureMicrophoneReady();
+    elements.transcript.value = "";
+    lastVoiceError = "";
+    recognition.start();
+  } catch (error) {
+    const message = getMicrophoneErrorMessage(error);
+    lastVoiceError = message;
+    listening = false;
+    document.body.dataset.listening = "false";
+    elements.micButton.setAttribute("aria-pressed", "false");
+    updateMicButtonLabel();
+    elements.voiceStatus.textContent = message;
+    logAssistant(message, "warning");
+  } finally {
+    elements.micButton.disabled = false;
+  }
+}
+
+async function ensureMicrophoneReady() {
+  if (!window.isSecureContext) {
+    throw new Error("insecure-context");
+  }
+  if (!navigator.mediaDevices?.getUserMedia) return;
+
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+    },
+  });
+  stream.getTracks().forEach((track) => track.stop());
+}
+
+function getMicrophoneErrorMessage(error) {
+  const name = error?.name || error?.message || "";
+  if (name === "insecure-context") return "语音录入需要 HTTPS 或 localhost 环境。当前页面无法安全访问麦克风，可先使用文字命令。";
+  if (name === "NotAllowedError" || name === "PermissionDeniedError") return "麦克风权限未开启。请在浏览器地址栏允许麦克风后再点开始语音。";
+  if (name === "NotFoundError" || name === "DevicesNotFoundError") return "没有检测到可用麦克风。请连接或启用麦克风后再试。";
+  if (name === "NotReadableError" || name === "TrackStartError") return "麦克风正被其他应用占用，关闭占用麦克风的应用后再试。";
+  return `麦克风启动失败：${name || "未知错误"}。可先使用文字命令。`;
+}
+
+function getRecognitionErrorMessage(errorCode) {
+  const messages = {
+    "not-allowed": "麦克风权限未开启。请在浏览器地址栏允许麦克风后再点开始语音。",
+    "service-not-allowed": "浏览器语音识别服务被禁用，可先使用文字命令。",
+    "audio-capture": "没有采集到麦克风音频。请检查系统麦克风、浏览器权限和输入设备。",
+    network: "浏览器语音识别服务连接失败。Chrome 的语音识别可能需要联网，可先使用文字命令。",
+    "no-speech": "没有检测到清晰语音。请靠近麦克风，看到“正在收音”后再说一次。",
+    aborted: "语音识别已停止。",
+    "language-not-supported": "当前浏览器不支持中文语音识别，可先使用文字命令。",
+  };
+  return messages[errorCode] || `语音识别失败：${errorCode || "未知错误"}。可先使用文字命令。`;
+}
+
+function updateMicButtonLabel() {
+  const label = elements.micButton.querySelector("span");
+  if (label) label.textContent = listening ? "停止语音" : "开始语音";
 }
 
 function handleCommand(rawText) {
