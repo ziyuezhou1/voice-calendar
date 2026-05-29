@@ -20,6 +20,7 @@ import {
 
 const STORE_KEY = "voice-calendar-events-v1";
 const SETTINGS_KEY = "voice-calendar-settings-v1";
+const REMINDER_CHECK_INTERVAL_MS = 15000;
 
 const THEMES = {
   light: "浅色",
@@ -1091,7 +1092,12 @@ function updateNotificationButton() {
 
 function scheduleReminderChecks() {
   checkReminders();
-  window.setInterval(checkReminders, 15000);
+  window.setInterval(checkReminders, REMINDER_CHECK_INTERVAL_MS);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") checkReminders();
+  });
+  window.addEventListener("focus", checkReminders);
+  window.addEventListener("pageshow", checkReminders);
 }
 
 function checkReminders() {
