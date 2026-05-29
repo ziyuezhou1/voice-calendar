@@ -9,7 +9,7 @@ import {
   normalizeCommand,
   parseVoiceCommand,
   weekRange,
-} from "./calendar-core.js?v=voice-start-3";
+} from "./calendar-core.js?v=voice-start-4";
 import { getHoliday, getMonthHolidays, hasHolidayData, HOLIDAY_SOURCE } from "./holiday-data.js";
 
 const STORE_KEY = "voice-calendar-events-v1";
@@ -85,6 +85,7 @@ let recognitionRestartTimer = null;
 let voiceStopRequested = false;
 let microphonePermissionState = "unknown";
 let microphonePermissionRequesting = false;
+let systemVoiceInputMode = false;
 let lastVoiceError = "";
 let toastTimer = null;
 let settings = loadSettings();
@@ -167,6 +168,11 @@ async function refreshMicrophonePermissionStatus() {
 function updateSpeechSupportStatus() {
   if (!SpeechRecognitionConstructor) {
     elements.supportStatus.textContent = "当前浏览器不支持语音识别，可使用文字命令";
+    return;
+  }
+
+  if (systemVoiceInputMode) {
+    elements.supportStatus.textContent = "可使用系统语音输入";
     return;
   }
 
@@ -266,6 +272,11 @@ function createSpeechRecognitionSession() {
       updateSpeechSupportStatus();
     }
 
+    if (event.error === "aborted" && elapsedMs < 1500 && microphonePermissionState === "granted") {
+      systemVoiceInputMode = true;
+      updateSpeechSupportStatus();
+    }
+
     voiceStarting = false;
     listening = false;
     document.body.dataset.listening = "false";
@@ -313,6 +324,10 @@ function createSpeechRecognitionSession() {
 function toggleVoice() {
   if (!SpeechRecognitionConstructor) return;
   if (microphonePermissionRequesting) return;
+  if (systemVoiceInputMode) {
+    startSystemVoiceInput();
+    return;
+  }
   if (listening || voiceStarting) {
     stopRecognitionSession();
     return;
@@ -384,6 +399,18 @@ async function requestMicrophonePermission() {
     updateSpeechSupportStatus();
     updateMicButtonLabel();
   }
+}
+
+function startSystemVoiceInput() {
+  if (recognition || listening || voiceStarting) stopRecognitionSession();
+  voiceStopRequested = false;
+  const message = "已切换到系统语音输入。请在弹出的手机键盘上点击麦克风，说完后点执行。";
+  lastVoiceError = "";
+  elements.voiceStatus.textContent = message;
+  logAssistant(message, "hint");
+  elements.transcript.focus({ preventScroll: false });
+  const cursorPosition = elements.transcript.value.length;
+  elements.transcript.setSelectionRange(cursorPosition, cursorPosition);
 }
 
 function startRecognitionSession({ isRetry = false } = {}) {
@@ -494,8 +521,8 @@ function getStartErrorMessage(error) {
 
 function getRecognitionErrorMessage(errorCode, elapsedMs = 0) {
   if (errorCode === "aborted" && elapsedMs < 1500) {
-    if (microphonePermissionState === "granted") {
-      return "麦克风权限已开启，但浏览器语音服务刚启动就中止了。请刷新页面再试；如果仍失败，可先使用文字命令。";
+    if (systemVoiceInputMode) {
+      return "麦克风权限已开启，但浏览器语音服务刚启动就中止了。已切换到系统语音输入，请点击按钮后使用手机键盘麦克风录入。";
     }
     return "语音识别刚启动就被浏览器中止。请确认已允许麦克风权限；如果在微信、系统内置浏览器或不稳定的移动端浏览器中打开，请换 Chrome 后再试，也可以先使用文字命令。";
   }
@@ -517,6 +544,10 @@ function updateMicButtonLabel() {
   if (!label) return;
   if (microphonePermissionRequesting) {
     label.textContent = "授权中";
+    return;
+  }
+  if (systemVoiceInputMode) {
+    label.textContent = "系统语音输入";
     return;
   }
   if (listening || voiceStarting) {
