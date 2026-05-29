@@ -7,7 +7,7 @@ import {
   parseVoiceCommand,
   weekRange,
 } from "../src/calendar-core.js";
-import { getHoliday, getMonthHolidays, hasHolidayData } from "../src/holiday-data.js";
+import { getHoliday, getHolidayMarkers, getMonthHolidays, hasHolidayData } from "../src/holiday-data.js";
 
 const now = new Date(2026, 4, 29, 9, 20, 0);
 
@@ -116,7 +116,12 @@ function parse(text) {
   assert.equal(hasHolidayData(2026), true);
   assert.deepEqual(getHoliday("2026-10-01"), { name: "国庆", type: "holiday" });
   assert.deepEqual(getHoliday("2026-10-10"), { name: "调休上班", type: "workday" });
-  assert.equal(getMonthHolidays(2026, 9).length, 8);
+  assert.equal(getHolidayMarkers("2026-02-14").some((holiday) => holiday.name === "情人节"), true);
+  assert.equal(getHolidayMarkers("2026-04-05").some((holiday) => holiday.name === "复活节"), true);
+  assert.equal(getHolidayMarkers("2026-06-21").some((holiday) => holiday.name === "父亲节"), true);
+  assert.equal(getMonthHolidays(2026, 4).some((holiday) => holiday.name === "母亲节" && holiday.dateKey === "2026-05-10"), true);
+  assert.equal(getMonthHolidays(2026, 10).some((holiday) => holiday.name === "感恩节" && holiday.dateKey === "2026-11-26"), true);
+  assert.equal(getMonthHolidays(2026, 9).length, 10);
 }
 
 console.log("calendar-core tests passed");
