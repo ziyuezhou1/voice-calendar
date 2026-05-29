@@ -46,6 +46,13 @@ function parse(text) {
 }
 
 {
+  const command = parse("30号晚上八点预约体检");
+  assert.equal(command.intent, "add");
+  assert.equal(command.title, "体检");
+  assert.equal(formatDateTime(command.startsAt), "2026-05-30 20:00");
+}
+
+{
   const command = parse("查看本周日程");
   assert.equal(command.intent, "list");
   assert.equal(command.range.type, "week");
