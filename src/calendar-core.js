@@ -142,9 +142,9 @@ function parseExplicitDate(text, baseDate) {
     return { date, tokens: [full[0]], precision: "day" };
   }
 
-  const dayOnly = text.match(/(?<!\d)(\d{1,2}|[一二两三四五六七八九十]+)(?:号|日)/);
+  const dayOnly = text.match(/(^|[^\d])(\d{1,2}|[一二两三四五六七八九十]+)(?:号|日)/);
   if (dayOnly) {
-    const day = chineseToNumber(dayOnly[1]);
+    const day = chineseToNumber(dayOnly[2]);
     const date = new Date(baseDate.getFullYear(), baseDate.getMonth(), day, baseDate.getHours(), baseDate.getMinutes(), 0, 0);
     if (date < startOfDay(baseDate)) date.setMonth(date.getMonth() + 1);
     return { date, tokens: [dayOnly[0]], precision: "day" };
