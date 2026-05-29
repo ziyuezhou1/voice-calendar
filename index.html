@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>声历 Voice Calendar</title>
-    <link rel="stylesheet" href="./styles.css?v=theme-fix-2" />
+    <link rel="stylesheet" href="./styles.css?v=calendar-nav-1" />
   </head>
   <body data-theme="light">
     <div class="app-shell">
@@ -126,10 +126,36 @@
           <div class="panel-heading compact">
             <div>
               <span class="eyebrow">月历</span>
-              <h2>按日期查看</h2>
+              <h2 id="calendar-title">按日期查看</h2>
             </div>
           </div>
+          <div class="calendar-toolbar" aria-label="切换年月">
+            <button class="icon-button" type="button" data-action="previous-month" aria-label="上个月" title="上个月">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m15.4 5 1.4 1.4L11.2 12l5.6 5.6-1.4 1.4-7-7 7-7Z"></path>
+              </svg>
+            </button>
+            <label>
+              <span>年份</span>
+              <select id="calendar-year" aria-label="选择年份"></select>
+            </label>
+            <label>
+              <span>月份</span>
+              <select id="calendar-month" aria-label="选择月份"></select>
+            </label>
+            <button class="icon-button" type="button" data-action="next-month" aria-label="下个月" title="下个月">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m8.6 19-1.4-1.4 5.6-5.6-5.6-5.6L8.6 5l7 7-7 7Z"></path>
+              </svg>
+            </button>
+            <button class="secondary-button compact" type="button" data-action="go-today">今天</button>
+          </div>
           <div class="calendar-grid" id="calendar-grid"></div>
+          <div class="holiday-legend" aria-label="日历标注图例">
+            <span><i class="holiday-dot rest"></i>法定节假日</span>
+            <span><i class="holiday-dot work"></i>调休上班</span>
+          </div>
+          <div class="month-holidays" id="month-holidays"></div>
         </section>
 
         <section class="agenda-panel" aria-labelledby="range-label">
@@ -155,6 +181,6 @@
     </div>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script type="module" src="./src/app.js?v=theme-fix-2"></script>
+    <script type="module" src="./src/app.js?v=calendar-nav-1"></script>
   </body>
 </html>

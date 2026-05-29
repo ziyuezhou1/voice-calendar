@@ -9,7 +9,8 @@ import {
   normalizeCommand,
   parseVoiceCommand,
   weekRange,
-} from "./calendar-core.js?v=theme-fix-2";
+} from "./calendar-core.js?v=calendar-nav-1";
+import { getHoliday, getMonthHolidays, hasHolidayData, HOLIDAY_SOURCE } from "./holiday-data.js";
 
 const STORE_KEY = "voice-calendar-events-v1";
 const SETTINGS_KEY = "voice-calendar-settings-v1";
@@ -47,6 +48,10 @@ const elements = {
   eventList: document.querySelector("#event-list"),
   todayList: document.querySelector("#today-list"),
   calendarGrid: document.querySelector("#calendar-grid"),
+  calendarTitle: document.querySelector("#calendar-title"),
+  calendarYear: document.querySelector("#calendar-year"),
+  calendarMonth: document.querySelector("#calendar-month"),
+  monthHolidays: document.querySelector("#month-holidays"),
   rangeLabel: document.querySelector("#range-label"),
   stats: document.querySelector("#stats"),
   examples: document.querySelector("#examples"),
@@ -66,6 +71,7 @@ const examples = [
 
 let events = loadEvents();
 let activeRange = dayRange(new Date(), "今天");
+let calendarCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 let recognition = null;
 let listening = false;
 let toastTimer = null;
@@ -75,6 +81,7 @@ init();
 
 function init() {
   setupSpeechRecognition();
+  renderCalendarControls();
   renderExamples();
   bindEvents();
   applyTheme(settings.theme || "light", { persist: false });
@@ -108,6 +115,11 @@ function bindEvents() {
   elements.eventList.addEventListener("click", handleEventListClick);
   elements.todayList.addEventListener("click", handleEventListClick);
   elements.calendarGrid.addEventListener("click", handleCalendarClick);
+  elements.calendarYear.addEventListener("change", handleCalendarSelect);
+  elements.calendarMonth.addEventListener("change", handleCalendarSelect);
+  document.querySelector("[data-action='previous-month']").addEventListener("click", () => moveCalendarMonth(-1));
+  document.querySelector("[data-action='next-month']").addEventListener("click", () => moveCalendarMonth(1));
+  document.querySelector("[data-action='go-today']").addEventListener("click", goToday);
 }
 
 function setupSpeechRecognition() {
@@ -269,6 +281,7 @@ function handleAdd(command) {
   events = [...events, event];
   saveEvents();
   activeRange = dayRange(new Date(event.startsAt), formatDateKey(event.startsAt));
+  calendarCursor = new Date(new Date(event.startsAt).getFullYear(), new Date(event.startsAt).getMonth(), 1);
   render();
 
   const reminderText = event.reminderMinutes === null ? "不提醒" : event.reminderMinutes === 0 ? "准时提醒" : `提前 ${event.reminderMinutes} 分钟提醒`;
@@ -302,6 +315,7 @@ function handleDelete(command) {
 
 function handleList(command) {
   activeRange = command.range;
+  if (activeRange.start) calendarCursor = new Date(activeRange.start.getFullYear(), activeRange.start.getMonth(), 1);
   const matched = filterEvents(events, activeRange);
   render();
 
@@ -331,6 +345,28 @@ function handleCalendarClick(event) {
   if (!dayButton) return;
   const selected = new Date(`${dayButton.dataset.date}T00:00:00`);
   activeRange = dayRange(selected, dayButton.dataset.date);
+  calendarCursor = new Date(selected.getFullYear(), selected.getMonth(), 1);
+  render();
+}
+
+function handleCalendarSelect() {
+  const year = Number(elements.calendarYear.value);
+  const month = Number(elements.calendarMonth.value);
+  calendarCursor = new Date(year, month, 1);
+  activeRange = monthRange(calendarCursor, `${year}年${month + 1}月`);
+  render();
+}
+
+function moveCalendarMonth(delta) {
+  calendarCursor = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth() + delta, 1);
+  activeRange = monthRange(calendarCursor, `${calendarCursor.getFullYear()}年${calendarCursor.getMonth() + 1}月`);
+  render();
+}
+
+function goToday() {
+  const today = new Date();
+  calendarCursor = new Date(today.getFullYear(), today.getMonth(), 1);
+  activeRange = dayRange(today, "今天");
   render();
 }
 
@@ -339,6 +375,13 @@ function render() {
   renderCalendar();
   renderEvents();
   updateNotificationButton();
+}
+
+function renderCalendarControls() {
+  const currentYear = new Date().getFullYear();
+  const years = Array.from({ length: 21 }, (_, index) => currentYear - 10 + index);
+  elements.calendarYear.innerHTML = years.map((year) => `<option value="${year}">${year}年</option>`).join("");
+  elements.calendarMonth.innerHTML = Array.from({ length: 12 }, (_, index) => `<option value="${index}">${index + 1}月</option>`).join("");
 }
 
 function renderStats() {
@@ -400,7 +443,7 @@ function renderEmptyState(text) {
 
 function renderCalendar() {
   const today = new Date();
-  const rangeDate = activeRange?.start || today;
+  const rangeDate = calendarCursor || activeRange?.start || today;
   const month = monthRange(rangeDate);
   const firstVisible = weekRange(month.start).start;
   const days = Array.from({ length: 42 }, (_, index) => addDays(firstVisible, index));
@@ -409,23 +452,43 @@ function renderCalendar() {
     acc[key] = (acc[key] || 0) + 1;
     return acc;
   }, {});
+  const displayYear = rangeDate.getFullYear();
+  const displayMonth = rangeDate.getMonth();
+  const monthHolidays = getMonthHolidays(displayYear, displayMonth);
+
+  elements.calendarTitle.textContent = `${displayYear}年${displayMonth + 1}月`;
+  elements.calendarYear.value = String(displayYear);
+  elements.calendarMonth.value = String(displayMonth);
 
   elements.calendarGrid.innerHTML = `
     ${["一", "二", "三", "四", "五", "六", "日"].map((day) => `<span class="weekday">${day}</span>`).join("")}
     ${days.map((day) => {
       const key = formatDateKey(day);
-      const outside = day.getMonth() !== new Date(rangeDate).getMonth();
+      const holiday = getHoliday(key);
+      const outside = day.getMonth() !== displayMonth;
       const isToday = key === formatDateKey(today);
       const isActive = activeRange?.type === "day" && key === formatDateKey(activeRange.start);
       const count = eventCounts[key] || 0;
+      const holidayClass = holiday ? ` ${holiday.type}` : "";
+      const holidayPrefix = holiday?.type === "holiday" ? "休" : "班";
       return `
-        <button class="calendar-day ${outside ? "outside" : ""} ${isToday ? "today" : ""} ${isActive ? "active" : ""}" type="button" data-date="${key}" aria-label="${key}，${count} 条日程">
-          <span>${day.getDate()}</span>
+        <button class="calendar-day ${outside ? "outside" : ""} ${isToday ? "today" : ""} ${isActive ? "active" : ""}${holidayClass}" type="button" data-date="${key}" aria-label="${key}，${count} 条日程${holiday ? `，${holiday.name}` : ""}">
+          <span class="day-number">${day.getDate()}</span>
+          ${holiday ? `<strong class="holiday-badge">${holidayPrefix}</strong><small>${escapeHtml(holiday.name)}</small>` : ""}
           ${count ? `<em>${count}</em>` : ""}
         </button>
       `;
     }).join("")}
   `;
+
+  if (!hasHolidayData(displayYear)) {
+    elements.monthHolidays.innerHTML = `<p>暂未录入 ${displayYear} 年法定节假日安排。</p>`;
+    return;
+  }
+
+  elements.monthHolidays.innerHTML = monthHolidays.length
+    ? `<ul>${monthHolidays.map((holiday) => `<li class="${holiday.type}"><span>${holiday.dateKey.slice(5)}</span>${holiday.name}</li>`).join("")}</ul><p>来源：${HOLIDAY_SOURCE.title}</p>`
+    : `<p>${displayYear}年${displayMonth + 1}月无法定节假日或调休上班日。</p>`;
 }
 
 function renderExamples() {
