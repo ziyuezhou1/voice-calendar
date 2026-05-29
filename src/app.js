@@ -9,7 +9,7 @@ import {
   normalizeCommand,
   parseVoiceCommand,
   weekRange,
-} from "./calendar-core.js?v=voice-start-1";
+} from "./calendar-core.js?v=voice-start-2";
 import { getHoliday, getMonthHolidays, hasHolidayData, HOLIDAY_SOURCE } from "./holiday-data.js";
 
 const STORE_KEY = "voice-calendar-events-v1";
@@ -73,10 +73,16 @@ const examples = [
 let events = loadEvents();
 let activeRange = dayRange(new Date(), "今天");
 let calendarCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+let SpeechRecognitionConstructor = null;
 let recognition = null;
 let listening = false;
 let voiceStarting = false;
 let voiceStartTime = 0;
+let recognitionSessionId = 0;
+let quickAbortRetries = 0;
+let retryAfterRecognitionEnd = false;
+let recognitionRestartTimer = null;
+let voiceStopRequested = false;
 let lastVoiceError = "";
 let toastTimer = null;
 let settings = loadSettings();
@@ -128,20 +134,25 @@ function bindEvents() {
 }
 
 function setupSpeechRecognition() {
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  const speechSupported = Boolean(SpeechRecognition);
+  SpeechRecognitionConstructor = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const speechSupported = Boolean(SpeechRecognitionConstructor);
   elements.supportStatus.textContent = speechSupported ? "浏览器语音识别已就绪" : "当前浏览器不支持语音识别，可使用文字命令";
   elements.micButton.disabled = !speechSupported;
+}
 
-  if (!speechSupported) return;
+function createSpeechRecognitionSession() {
+  recognitionSessionId += 1;
+  const sessionId = recognitionSessionId;
+  const sessionRecognition = new SpeechRecognitionConstructor();
+  const isCurrentSession = () => recognition === sessionRecognition && recognitionSessionId === sessionId;
 
-  recognition = new SpeechRecognition();
-  recognition.lang = "zh-CN";
-  recognition.continuous = false;
-  recognition.interimResults = true;
-  recognition.maxAlternatives = 1;
+  sessionRecognition.lang = "zh-CN";
+  sessionRecognition.continuous = false;
+  sessionRecognition.interimResults = true;
+  sessionRecognition.maxAlternatives = 1;
 
-  recognition.addEventListener("start", () => {
+  sessionRecognition.addEventListener("start", () => {
+    if (!isCurrentSession()) return;
     voiceStarting = false;
     listening = true;
     lastVoiceError = "";
@@ -151,26 +162,31 @@ function setupSpeechRecognition() {
     updateMicButtonLabel();
   });
 
-  recognition.addEventListener("audiostart", () => {
+  sessionRecognition.addEventListener("audiostart", () => {
+    if (!isCurrentSession()) return;
     elements.voiceStatus.textContent = "麦克风已接通，正在收音";
     pulseVoiceMeter();
   });
 
-  recognition.addEventListener("soundstart", () => {
+  sessionRecognition.addEventListener("soundstart", () => {
+    if (!isCurrentSession()) return;
     elements.voiceStatus.textContent = "检测到声音，正在识别";
     pulseVoiceMeter();
   });
 
-  recognition.addEventListener("speechstart", () => {
+  sessionRecognition.addEventListener("speechstart", () => {
+    if (!isCurrentSession()) return;
     elements.voiceStatus.textContent = "检测到语音，请继续说";
     pulseVoiceMeter();
   });
 
-  recognition.addEventListener("speechend", () => {
+  sessionRecognition.addEventListener("speechend", () => {
+    if (!isCurrentSession()) return;
     elements.voiceStatus.textContent = "已收到语音，正在转成文字";
   });
 
-  recognition.addEventListener("result", (event) => {
+  sessionRecognition.addEventListener("result", (event) => {
+    if (!isCurrentSession()) return;
     let transcript = "";
     for (let index = event.resultIndex; index < event.results.length; index += 1) {
       transcript += event.results[index][0].transcript;
@@ -183,38 +199,72 @@ function setupSpeechRecognition() {
     if (lastResult?.isFinal) handleCommand(elements.transcript.value);
   });
 
-  recognition.addEventListener("error", (event) => {
+  sessionRecognition.addEventListener("error", (event) => {
+    if (!isCurrentSession()) return;
+    const elapsedMs = Date.now() - voiceStartTime;
+
+    if (voiceStopRequested) {
+      lastVoiceError = "";
+      return;
+    }
+
+    if (shouldRetryQuickAbort(event.error, elapsedMs)) {
+      quickAbortRetries += 1;
+      retryAfterRecognitionEnd = true;
+      lastVoiceError = "";
+      elements.voiceStatus.textContent = "浏览器中止了一次，正在重建语音会话";
+      logAssistant("浏览器刚刚中止了语音识别，我会自动重试一次。", "warning");
+      return;
+    }
+
     voiceStarting = false;
     listening = false;
     document.body.dataset.listening = "false";
     elements.micButton.setAttribute("aria-pressed", "false");
     updateMicButtonLabel();
-    const message = getRecognitionErrorMessage(event.error, Date.now() - voiceStartTime);
+    const message = getRecognitionErrorMessage(event.error, elapsedMs);
     lastVoiceError = message;
     elements.voiceStatus.textContent = message;
     logAssistant(message, "warning");
   });
 
-  recognition.addEventListener("end", () => {
+  sessionRecognition.addEventListener("end", () => {
+    if (!isCurrentSession()) return;
+    recognition = null;
+
+    if (retryAfterRecognitionEnd && !voiceStopRequested) {
+      retryAfterRecognitionEnd = false;
+      listening = false;
+      voiceStarting = true;
+      document.body.dataset.listening = "true";
+      elements.micButton.setAttribute("aria-pressed", "true");
+      updateMicButtonLabel();
+      window.clearTimeout(recognitionRestartTimer);
+      recognitionRestartTimer = window.setTimeout(() => startRecognitionSession({ isRetry: true }), 250);
+      return;
+    }
+
     voiceStarting = false;
     listening = false;
+    retryAfterRecognitionEnd = false;
     document.body.dataset.listening = "false";
     elements.micButton.setAttribute("aria-pressed", "false");
     updateMicButtonLabel();
-    if (!lastVoiceError) {
+    if (voiceStopRequested) {
+      elements.voiceStatus.textContent = "语音识别已停止。";
+    } else if (!lastVoiceError) {
       elements.voiceStatus.textContent = elements.transcript.value.trim() ? "待命中" : "语音识别已结束，可再次点击开始语音";
     }
+    voiceStopRequested = false;
   });
+
+  return sessionRecognition;
 }
 
 function toggleVoice() {
-  if (!recognition) return;
+  if (!SpeechRecognitionConstructor) return;
   if (listening || voiceStarting) {
-    try {
-      recognition.stop();
-    } catch {
-      recognition.abort?.();
-    }
+    stopRecognitionSession();
     return;
   }
 
@@ -226,16 +276,38 @@ function toggleVoice() {
     return;
   }
 
+  startRecognitionSession();
+}
+
+function startRecognitionSession({ isRetry = false } = {}) {
+  window.clearTimeout(recognitionRestartTimer);
+  retryAfterRecognitionEnd = false;
+  voiceStopRequested = false;
+  if (!isRetry) quickAbortRetries = 0;
+
+  if (recognition) {
+    try {
+      recognition.abort?.();
+    } catch {
+      // Some mobile implementations throw if the stale session already ended.
+    }
+    recognition = null;
+  }
+
   try {
+    recognition = createSpeechRecognitionSession();
     voiceStarting = true;
     voiceStartTime = Date.now();
-    elements.transcript.value = "";
+    if (!isRetry) elements.transcript.value = "";
     lastVoiceError = "";
-    elements.voiceStatus.textContent = "正在启动语音识别，请允许麦克风权限";
+    document.body.dataset.listening = "true";
+    elements.voiceStatus.textContent = isRetry ? "正在重新启动语音识别，请稍等" : "正在启动语音识别，请允许麦克风权限";
     elements.micButton.setAttribute("aria-pressed", "true");
     updateMicButtonLabel();
+    window.speechSynthesis?.cancel();
     recognition.start();
   } catch (error) {
+    recognition = null;
     voiceStarting = false;
     const message = getStartErrorMessage(error);
     lastVoiceError = message;
@@ -248,6 +320,43 @@ function toggleVoice() {
   }
 }
 
+function stopRecognitionSession() {
+  voiceStopRequested = true;
+  retryAfterRecognitionEnd = false;
+  window.clearTimeout(recognitionRestartTimer);
+
+  if (!recognition) {
+    voiceStarting = false;
+    listening = false;
+    document.body.dataset.listening = "false";
+    elements.micButton.setAttribute("aria-pressed", "false");
+    elements.voiceStatus.textContent = "语音识别已停止。";
+    updateMicButtonLabel();
+    return;
+  }
+
+  elements.voiceStatus.textContent = "正在停止语音识别";
+  try {
+    recognition.stop();
+  } catch {
+    try {
+      recognition.abort?.();
+    } catch {
+      recognition = null;
+      voiceStarting = false;
+      listening = false;
+      document.body.dataset.listening = "false";
+      elements.micButton.setAttribute("aria-pressed", "false");
+      elements.voiceStatus.textContent = "语音识别已停止。";
+      updateMicButtonLabel();
+    }
+  }
+}
+
+function shouldRetryQuickAbort(errorCode, elapsedMs) {
+  return errorCode === "aborted" && elapsedMs < 1500 && quickAbortRetries < 1;
+}
+
 function getStartErrorMessage(error) {
   const name = error?.name || error?.message || "";
   if (name === "InvalidStateError") return "语音识别已经在启动中，请稍等一秒再试。";
@@ -257,7 +366,7 @@ function getStartErrorMessage(error) {
 
 function getRecognitionErrorMessage(errorCode, elapsedMs = 0) {
   if (errorCode === "aborted" && elapsedMs < 1500) {
-    return "语音识别刚启动就被浏览器中止。请确认已允许麦克风权限，刷新页面后再点开始语音；也可以先使用文字命令。";
+    return "语音识别刚启动就被浏览器中止。请确认已允许麦克风权限；如果在微信、系统内置浏览器或不稳定的移动端浏览器中打开，请换 Chrome 后再试，也可以先使用文字命令。";
   }
 
   const messages = {
