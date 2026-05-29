@@ -9,8 +9,14 @@ import {
   normalizeCommand,
   parseVoiceCommand,
   weekRange,
-} from "./calendar-core.js?v=voice-start-4";
+} from "./calendar-core.js?v=android-speech-1";
 import { getHoliday, getMonthHolidays, hasHolidayData, HOLIDAY_SOURCE } from "./holiday-data.js";
+import {
+  getSpeechAdapterErrorMessage,
+  hasNativeSpeechRecognition,
+  startNativeSpeechRecognition,
+  stopNativeSpeechRecognition,
+} from "./speech-adapter.js?v=android-speech-1";
 
 const STORE_KEY = "voice-calendar-events-v1";
 const SETTINGS_KEY = "voice-calendar-settings-v1";
@@ -73,6 +79,9 @@ const examples = [
 let events = loadEvents();
 let activeRange = dayRange(new Date(), "今天");
 let calendarCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+let nativeSpeechSupported = false;
+let nativeSpeechActive = false;
+let nativeSpeechStopRequested = false;
 let SpeechRecognitionConstructor = null;
 let recognition = null;
 let listening = false;
@@ -137,12 +146,13 @@ function bindEvents() {
 }
 
 function setupSpeechRecognition() {
+  nativeSpeechSupported = hasNativeSpeechRecognition();
   SpeechRecognitionConstructor = window.SpeechRecognition || window.webkitSpeechRecognition;
-  const speechSupported = Boolean(SpeechRecognitionConstructor);
+  const speechSupported = nativeSpeechSupported || Boolean(SpeechRecognitionConstructor);
   updateSpeechSupportStatus();
   elements.micButton.disabled = !speechSupported;
   updateMicButtonLabel();
-  if (speechSupported) refreshMicrophonePermissionStatus();
+  if (!nativeSpeechSupported && speechSupported) refreshMicrophonePermissionStatus();
 }
 
 async function refreshMicrophonePermissionStatus() {
@@ -166,6 +176,11 @@ async function refreshMicrophonePermissionStatus() {
 }
 
 function updateSpeechSupportStatus() {
+  if (nativeSpeechSupported) {
+    elements.supportStatus.textContent = nativeSpeechActive ? "Android 原生语音识别中" : "Android 原生语音识别已就绪";
+    return;
+  }
+
   if (!SpeechRecognitionConstructor) {
     elements.supportStatus.textContent = "当前浏览器不支持语音识别，可使用文字命令";
     return;
@@ -322,6 +337,15 @@ function createSpeechRecognitionSession() {
 }
 
 function toggleVoice() {
+  if (nativeSpeechSupported) {
+    if (nativeSpeechActive) {
+      stopNativeSpeechSession();
+      return;
+    }
+    startNativeSpeechSession();
+    return;
+  }
+
   if (!SpeechRecognitionConstructor) return;
   if (microphonePermissionRequesting) return;
   if (systemVoiceInputMode) {
@@ -351,6 +375,71 @@ function toggleVoice() {
 
 function shouldRequestMicrophonePermissionBeforeRecognition() {
   return Boolean(navigator.mediaDevices?.getUserMedia) && microphonePermissionState !== "granted";
+}
+
+async function startNativeSpeechSession() {
+  nativeSpeechActive = true;
+  nativeSpeechStopRequested = false;
+  listening = true;
+  lastVoiceError = "";
+  elements.transcript.value = "";
+  document.body.dataset.listening = "true";
+  elements.micButton.setAttribute("aria-pressed", "true");
+  elements.voiceStatus.textContent = "正在启动 Android 原生语音识别";
+  updateSpeechSupportStatus();
+  updateMicButtonLabel();
+  window.speechSynthesis?.cancel();
+
+  try {
+    const result = await startNativeSpeechRecognition({
+      onPartialResult: (text) => {
+        elements.transcript.value = text;
+        elements.voiceStatus.textContent = "Android 原生语音识别中";
+        pulseVoiceMeter();
+      },
+      onStatus: (message) => {
+        elements.voiceStatus.textContent = message;
+      },
+    });
+
+    if (nativeSpeechStopRequested) return;
+
+    const text = result.text.trim();
+    if (text) {
+      elements.transcript.value = text;
+      handleCommand(text);
+    } else {
+      const message = "没有收到清晰语音。请再点一次开始语音，靠近麦克风说完整命令。";
+      lastVoiceError = message;
+      elements.voiceStatus.textContent = message;
+      logAssistant(message, "warning");
+    }
+  } catch (error) {
+    if (!nativeSpeechStopRequested) {
+      const message = getSpeechAdapterErrorMessage(error);
+      lastVoiceError = message;
+      elements.voiceStatus.textContent = message;
+      logAssistant(message, "warning");
+    }
+  } finally {
+    nativeSpeechActive = false;
+    nativeSpeechStopRequested = false;
+    listening = false;
+    document.body.dataset.listening = "false";
+    elements.micButton.setAttribute("aria-pressed", "false");
+    updateSpeechSupportStatus();
+    updateMicButtonLabel();
+  }
+}
+
+async function stopNativeSpeechSession() {
+  nativeSpeechStopRequested = true;
+  elements.voiceStatus.textContent = "正在停止 Android 原生语音识别";
+  try {
+    await stopNativeSpeechRecognition();
+  } catch (error) {
+    logAssistant(getSpeechAdapterErrorMessage(error), "warning");
+  }
 }
 
 async function requestMicrophonePermission() {
@@ -522,9 +611,9 @@ function getStartErrorMessage(error) {
 function getRecognitionErrorMessage(errorCode, elapsedMs = 0) {
   if (errorCode === "aborted" && elapsedMs < 1500) {
     if (systemVoiceInputMode) {
-      return "麦克风权限已开启，但浏览器语音服务刚启动就中止了。已切换到系统语音输入，请点击按钮后使用手机键盘麦克风录入。";
+      return withRecognitionErrorCode("麦克风权限已开启，但浏览器语音服务刚启动就中止了。已切换到系统语音输入，请点击按钮后使用手机键盘麦克风录入。", errorCode);
     }
-    return "语音识别刚启动就被浏览器中止。请确认已允许麦克风权限；如果在微信、系统内置浏览器或不稳定的移动端浏览器中打开，请换 Chrome 后再试，也可以先使用文字命令。";
+    return withRecognitionErrorCode("语音识别刚启动就被浏览器中止。请确认已允许麦克风权限；如果在微信、系统内置浏览器或不稳定的移动端浏览器中打开，请换 Chrome 后再试，也可以先使用文字命令。", errorCode);
   }
 
   const messages = {
@@ -536,12 +625,24 @@ function getRecognitionErrorMessage(errorCode, elapsedMs = 0) {
     aborted: "语音识别已停止。",
     "language-not-supported": "当前浏览器不支持中文语音识别，可先使用文字命令。",
   };
-  return messages[errorCode] || `语音识别失败：${errorCode || "未知错误"}。可先使用文字命令。`;
+  return withRecognitionErrorCode(messages[errorCode] || "语音识别失败，可先使用文字命令。", errorCode);
+}
+
+function withRecognitionErrorCode(message, errorCode) {
+  return errorCode ? `${message}（错误类型：${errorCode}）` : message;
 }
 
 function updateMicButtonLabel() {
   const label = elements.micButton.querySelector("span");
   if (!label) return;
+  if (nativeSpeechActive) {
+    label.textContent = "停止语音";
+    return;
+  }
+  if (nativeSpeechSupported) {
+    label.textContent = "开始语音";
+    return;
+  }
   if (microphonePermissionRequesting) {
     label.textContent = "授权中";
     return;
