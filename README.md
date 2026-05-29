@@ -13,6 +13,7 @@
 ## 已实现功能
 
 - 语音识别：使用浏览器 Web Speech API，支持中文语音转文字。
+- Android 原生语音识别：通过 Capacitor App 调用系统语音识别插件，移动端优先走原生能力。
 - 语音反馈：使用 SpeechSynthesis 播报添加、删除、查询和提醒结果。
 - 中文命令解析：支持相对日期、周几、显式日期、上午/下午、半小时后、提前提醒。
 - 多轮追问：添加日程时缺少日期、时间或事项名称，会继续追问补齐后再创建。
@@ -57,9 +58,31 @@ http://localhost:5173
 npm test
 ```
 
+## Android App
+
+本项目保留 Web 版，同时提供 Capacitor Android App。Android 版复用同一套页面、LocalStorage 日历数据和中文命令解析逻辑，语音输入优先调用 `@capacitor-community/speech-recognition`，避免手机浏览器 Web Speech API 启动后被中止的问题。
+
+```bash
+npm install
+npm run build:web
+npm run cap:sync
+npm run android:open
+```
+
+打开 Android Studio 后可连接真机运行。首次启动会请求麦克风权限，授权后点击“开始语音”即可调用系统语音识别；识别文本会继续交给现有的日程命令处理流程。
+
+发布 APK：
+
+```bash
+git tag android-v0.1.0
+git push origin android-v0.1.0
+```
+
+推送 `android-v*` 标签后，GitHub Actions 会构建 debug-signed APK，并自动创建 GitHub Release。该 APK 适合真机评审和演示；正式上架前需要补充 release signing。
+
 ## 依赖说明
 
-本项目没有引入第三方运行时库或框架，依赖能力均来自浏览器和 Node.js：
+Web 版没有引入第三方运行时库或框架，依赖能力来自浏览器和 Node.js；Android 版新增 Capacitor 相关依赖：
 
 - Web Speech API：浏览器语音识别，部分浏览器可能不支持。
 - MediaDevices.getUserMedia：显式请求麦克风权限，授权后再启动语音识别。
@@ -67,8 +90,12 @@ npm test
 - Notification API：系统通知，可由用户授权开启。
 - LocalStorage：本地事件存储。
 - Node.js：仅用于本地静态服务器和测试脚本。
+- `@capacitor/core`、`@capacitor/cli`、`@capacitor/android`：将现有 Web 应用打包为 Android App。
+- `@capacitor-community/speech-recognition`：Android App 中调用系统语音识别服务。
 
 语音识别需要 HTTPS 或 localhost 环境，并依赖浏览器自身的语音服务。首次使用时页面会先请求麦克风权限，授权成功后再次点击“开始语音”才会同步启动语音识别；若提示权限、麦克风、网络或未检测到语音问题，可先使用文字命令完成同样操作。移动端浏览器若在启动后立刻中止语音识别，页面会自动重建语音会话并重试一次；如果权限已开启但浏览器语音服务仍持续中止，按钮会切换为“系统语音输入”，用户可用手机键盘上的麦克风完成语音录入。
+
+Android App 中语音识别由系统语音服务提供，仍可能依赖设备厂商、系统服务和网络状态；本工具属于“按住/点击后说一句命令”的短语音输入场景，不做长期后台监听。
 
 ## 节假日数据
 
@@ -77,6 +104,7 @@ npm test
 原创功能部分：
 
 - 中文自然语言命令解析。
+- Web Speech 与 Android 原生语音识别 adapter 接入。
 - 日程增删查、范围筛选和模糊删除匹配。
 - 本地提醒调度、语音反馈和页面交互。
 - 前端界面、样式和测试用例。

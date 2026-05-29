@@ -1,4 +1,6 @@
 node_modules/
+.npm-cache/
+www/
 .DS_Store
 Thumbs.db
 server.out.log
