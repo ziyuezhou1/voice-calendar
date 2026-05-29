@@ -237,12 +237,13 @@ function applyMeridiem(hour, meridiem = "") {
   return hour;
 }
 
-function parseReminder(text) {
+function parseReminder(text, options = {}) {
+  const defaultReminderMinutes = options.defaultReminderMinutes ?? 10;
   if (/不提醒|无需提醒/.test(text)) return { reminderMinutes: null, tokens: [text.match(/不提醒|无需提醒/)?.[0]] };
   if (/准时提醒|到点提醒/.test(text)) return { reminderMinutes: 0, tokens: [text.match(/准时提醒|到点提醒/)?.[0]] };
 
   const relative = text.match(/提前\s*([半一二两三四五六七八九十\d]+)\s*(分钟|小时|天)\s*提醒?/);
-  if (!relative) return { reminderMinutes: 10, tokens: [] };
+  if (!relative) return { reminderMinutes: defaultReminderMinutes, tokens: [] };
 
   const amount = chineseToNumber(relative[1]);
   const unit = relative[2];
@@ -252,7 +253,9 @@ function parseReminder(text) {
 
 function buildDateTime(text, baseDate) {
   const relativeTime = parseRelativeTime(text, baseDate);
-  if (relativeTime) return { startsAt: relativeTime.date, tokens: relativeTime.tokens, precision: relativeTime.precision, hasDate: true, hasTime: true };
+  if (relativeTime) {
+    return { startsAt: relativeTime.date, tokens: relativeTime.tokens, precision: relativeTime.precision, hasDate: true, hasTime: true, isRelativeTime: true };
+  }
 
   const datePart = parseDatePart(text, baseDate);
   const clock = parseClockTime(text);
@@ -371,7 +374,7 @@ export function parseVoiceCommand(input, options = {}) {
 
   if (intent === "add") {
     const dateTime = buildDateTime(text, now);
-    const reminder = parseReminder(text);
+    const reminder = parseReminder(text, { defaultReminderMinutes: dateTime.isRelativeTime ? 0 : 10 });
     const title = extractTitle(text, [...dateTime.tokens, ...reminder.tokens]);
     const missing = [];
     if (!dateTime.startsAt) missing.push("dateTime");
