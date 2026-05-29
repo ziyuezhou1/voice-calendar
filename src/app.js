@@ -176,6 +176,11 @@ async function refreshMicrophonePermissionStatus() {
 }
 
 function updateSpeechSupportStatus() {
+  if (systemVoiceInputMode) {
+    elements.supportStatus.textContent = "可使用系统语音输入";
+    return;
+  }
+
   if (nativeSpeechSupported) {
     elements.supportStatus.textContent = nativeSpeechActive ? "Android 原生语音识别中" : "Android 原生语音识别已就绪";
     return;
@@ -183,11 +188,6 @@ function updateSpeechSupportStatus() {
 
   if (!SpeechRecognitionConstructor) {
     elements.supportStatus.textContent = "当前浏览器不支持语音识别，可使用文字命令";
-    return;
-  }
-
-  if (systemVoiceInputMode) {
-    elements.supportStatus.textContent = "可使用系统语音输入";
     return;
   }
 
@@ -346,12 +346,12 @@ function toggleVoice() {
     return;
   }
 
-  if (!SpeechRecognitionConstructor) return;
   if (microphonePermissionRequesting) return;
   if (systemVoiceInputMode) {
     startSystemVoiceInput();
     return;
   }
+  if (!SpeechRecognitionConstructor) return;
   if (listening || voiceStarting) {
     stopRecognitionSession();
     return;
@@ -417,6 +417,10 @@ async function startNativeSpeechSession() {
   } catch (error) {
     if (!nativeSpeechStopRequested) {
       const message = getSpeechAdapterErrorMessage(error);
+      if (error?.code === "native-service-unavailable" || error?.code === "UNAVAILABLE") {
+        activateSystemVoiceInputFallback(message);
+        return;
+      }
       lastVoiceError = message;
       elements.voiceStatus.textContent = message;
       logAssistant(message, "warning");
@@ -493,13 +497,29 @@ async function requestMicrophonePermission() {
 function startSystemVoiceInput() {
   if (recognition || listening || voiceStarting) stopRecognitionSession();
   voiceStopRequested = false;
-  const message = "已切换到系统语音输入。请在弹出的手机键盘上点击麦克风，说完后点执行。";
+  const message = "已切换到系统语音输入。请在弹出的键盘上点击麦克风，说完后点执行。";
   lastVoiceError = "";
   elements.voiceStatus.textContent = message;
   logAssistant(message, "hint");
   elements.transcript.focus({ preventScroll: false });
   const cursorPosition = elements.transcript.value.length;
   elements.transcript.setSelectionRange(cursorPosition, cursorPosition);
+}
+
+function activateSystemVoiceInputFallback(reason) {
+  nativeSpeechSupported = false;
+  nativeSpeechActive = false;
+  nativeSpeechStopRequested = false;
+  listening = false;
+  systemVoiceInputMode = true;
+  document.body.dataset.listening = "false";
+  elements.micButton.setAttribute("aria-pressed", "false");
+  const message = `${reason} 已切换到系统语音输入；请点击按钮后使用键盘麦克风录入。`;
+  lastVoiceError = message;
+  elements.voiceStatus.textContent = message;
+  logAssistant(message, "warning");
+  updateSpeechSupportStatus();
+  updateMicButtonLabel();
 }
 
 function startRecognitionSession({ isRetry = false } = {}) {

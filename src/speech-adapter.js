@@ -50,8 +50,9 @@ export function getSpeechAdapterErrorMessage(error) {
   const code = error?.code || error?.message || "unknown";
   const messages = {
     "native-unavailable": "当前不是 Android App 环境，可继续使用网页语音或文字命令。",
-    "native-service-unavailable": "当前设备没有可用的系统语音识别服务，请检查系统语音服务或使用文字命令。",
+    "native-service-unavailable": "当前设备没有可用的系统语音识别服务，请安装或启用系统语音助手、Google App 或其他语音识别服务。",
     "native-permission-denied": "请先在系统设置中允许声历使用麦克风权限。",
+    UNAVAILABLE: "当前设备没有可用的系统语音识别服务，请安装或启用系统语音助手、Google App 或其他语音识别服务。",
   };
   return messages[code] || `Android 原生语音识别失败：${code}`;
 }
