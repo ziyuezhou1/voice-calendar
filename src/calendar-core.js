@@ -26,7 +26,7 @@ const WEEKDAY_ALIASES = {
 };
 
 const INTENT_WORDS = {
-  add: ["添加", "新增", "新建", "创建", "安排", "记一下", "记下", "提醒我", "帮我记", "预约"],
+  add: ["添加", "新增", "新建", "创建", "安排", "记一下", "记下", "提醒我", "帮我记", "帮我加", "加个", "加一个", "加一条", "预约"],
   delete: ["删除", "取消", "移除", "删掉", "去掉", "清除"],
   list: ["查看", "查询", "看看", "列出", "播报", "读一下", "今天有什么", "日程", "安排"],
 };
@@ -194,8 +194,9 @@ function parseRelativeTime(text, baseDate) {
 function parseClockTime(text) {
   const colon = text.match(/(凌晨|早上|上午|中午|下午|傍晚|晚上|今晚)?\s*(\d{1,2})[:：](\d{1,2})/);
   if (colon) {
+    const meridiem = colon[1] || inferLooseMeridiem(text, colon.index);
     return {
-      hour: applyMeridiem(Number(colon[2]), colon[1]),
+      hour: applyMeridiem(Number(colon[2]), meridiem),
       minute: Number(colon[3]),
       tokens: [colon[0]],
       precision: "minute",
@@ -212,12 +213,20 @@ function parseClockTime(text) {
   else if (natural[0].includes("三刻")) minute = 45;
   else if (minuteToken) minute = chineseToNumber(minuteToken);
 
+  const meridiem = natural[1] || inferLooseMeridiem(text, natural.index);
+
   return {
-    hour: applyMeridiem(chineseToNumber(natural[2]), natural[1]),
+    hour: applyMeridiem(chineseToNumber(natural[2]), meridiem),
     minute,
     tokens: [natural[0]],
     precision: "minute",
   };
+}
+
+function inferLooseMeridiem(text, matchIndex = 0) {
+  const before = text.slice(0, Math.max(0, matchIndex));
+  const matches = before.match(/凌晨|早上|上午|中午|下午|傍晚|晚上|今晚/g);
+  return matches ? matches[matches.length - 1] : "";
 }
 
 function applyMeridiem(hour, meridiem = "") {
@@ -284,7 +293,7 @@ function extractTitle(text, tokens = []) {
   title = title
     .replace(/^(请|麻烦|帮我|我要|我想|给我|在|于|到时候|日历里|日历上|日历)\s*/g, " ")
     .replace(/(^|\s)(我|我的|一下)(?=\s|$)/g, " ")
-    .replace(/(添加|新增|新建|创建|安排|记一下|记下|预约|提醒我|帮我记|提醒|事件|日程)/g, " ")
+    .replace(/(添加|新增|新建|创建|安排|记一下|记下|预约|提醒我|帮我记|帮我加|加个|加一个|加一条|提醒|事件|日程)/g, " ")
     .replace(/(删除|取消|移除|删掉|去掉|清除|查看|查询|看看|列出|播报|读一下)/g, " ")
     .replace(/(今天|今日|明天|明日|后天|大后天|本周|这周|下周|下下周|周[一二三四五六日天末]|星期[一二三四五六日天末]|礼拜[一二三四五六日天末])/g, " ")
     .replace(/(上午|下午|晚上|今晚|早上|中午|凌晨|傍晚)/g, " ")
