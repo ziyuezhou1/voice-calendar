@@ -8,8 +8,9 @@ import {
   monthRange,
   normalizeCommand,
   parseVoiceCommand,
+  updateEventFromCommand,
   weekRange,
-} from "./calendar-core.js?v=android-speech-1";
+} from "./calendar-core.js?v=event-update-1";
 import { getHoliday, getMonthHolidays, hasHolidayData, HOLIDAY_SOURCE } from "./holiday-data.js";
 import {
   getSpeechAdapterErrorMessage,
@@ -72,6 +73,8 @@ const examples = [
   "半小时后提醒喝水",
   "查看今天日程",
   "查询本周安排",
+  "把明天下午三点的团队周会改到四点",
+  "把喝水提醒改成提前十分钟",
   "取消明天下午三点团队周会",
   "切换到春天主题",
 ];
@@ -673,7 +676,7 @@ function handleCommand(rawText) {
     }
 
     const standaloneCommand = parseVoiceCommand(text, { now: new Date() });
-    if (theme || standaloneCommand.intent === "delete" || standaloneCommand.intent === "list") {
+    if (theme || standaloneCommand.intent === "delete" || standaloneCommand.intent === "list" || standaloneCommand.intent === "update") {
       pendingAdd = null;
       logAssistant("已结束上一次待补全的日程。", "info");
     } else {
@@ -695,6 +698,10 @@ function handleCommand(rawText) {
   }
   if (command.intent === "delete") {
     handleDelete(command);
+    return;
+  }
+  if (command.intent === "update") {
+    handleUpdate(command);
     return;
   }
   if (command.intent === "list") {
@@ -788,7 +795,7 @@ function handleAdd(command) {
   calendarCursor = new Date(new Date(event.startsAt).getFullYear(), new Date(event.startsAt).getMonth(), 1);
   render();
 
-  const reminderText = event.reminderMinutes === null ? "不提醒" : event.reminderMinutes === 0 ? "准时提醒" : `提前 ${event.reminderMinutes} 分钟提醒`;
+  const reminderText = formatReminderText(event.reminderMinutes, { includeVerb: true });
   const assumed = command.assumedTime ? "。你没有说具体时间，我先按上午九点记录" : "";
   const message = `已添加：${event.title}，${formatDateTime(event.startsAt)}，${reminderText}${assumed}。`;
   logAssistant(message, "success");
@@ -861,6 +868,39 @@ function handleDelete(command) {
 
   const extra = matches.length > 1 ? `另外还有 ${matches.length - 1} 条相似日程未删除。` : "";
   const message = `已删除：${target.title}，${formatDateTime(target.startsAt)}。${extra}`;
+  logAssistant(message, "success");
+  showToast(message);
+  speak(message);
+}
+
+function handleUpdate(command) {
+  if (command.missing?.length) {
+    const message = command.missing.includes("target")
+      ? "我还没找到要修改哪条日程。可以说：把明天下午三点的团队周会改到四点。"
+      : "我还没听清要改什么。可以说：改到四点，或改成提前十分钟提醒。";
+    logAssistant(message, "warning");
+    speak(message);
+    return;
+  }
+
+  const matches = findMatchingEvents(events, command);
+  if (!matches.length) {
+    const message = "没有找到要修改的日程。可以带上日期、时间或事项名称再试一次。";
+    logAssistant(message, "warning");
+    speak(message);
+    return;
+  }
+
+  const target = matches[0];
+  const updated = updateEventFromCommand(target, command);
+  events = events.map((event) => (event.id === target.id ? updated : event));
+  saveEvents();
+  activeRange = dayRange(new Date(updated.startsAt), formatDateKey(updated.startsAt));
+  calendarCursor = new Date(new Date(updated.startsAt).getFullYear(), new Date(updated.startsAt).getMonth(), 1);
+  render();
+
+  const extra = matches.length > 1 ? `另外还有 ${matches.length - 1} 条相似日程未修改。` : "";
+  const message = `已修改：${updated.title}，${formatDateTime(updated.startsAt)}，${formatReminderText(updated.reminderMinutes, { includeVerb: true })}。${extra}`;
   logAssistant(message, "success");
   showToast(message);
   speak(message);
@@ -960,7 +1000,7 @@ function renderEvents() {
 
 function renderEventItem(event) {
   const date = new Date(event.startsAt);
-  const reminder = event.reminderMinutes === null ? "不提醒" : event.reminderMinutes === 0 ? "准时提醒" : `提前 ${event.reminderMinutes} 分钟`;
+  const reminder = formatReminderText(event.reminderMinutes);
   return `
     <article class="event-item" data-testid="event-item">
       <time datetime="${event.startsAt}">
@@ -976,6 +1016,12 @@ function renderEventItem(event) {
       </button>
     </article>
   `;
+}
+
+function formatReminderText(reminderMinutes, options = {}) {
+  if (reminderMinutes === null) return "不提醒";
+  if (reminderMinutes === 0) return "准时提醒";
+  return `提前 ${reminderMinutes} 分钟${options.includeVerb ? "提醒" : ""}`;
 }
 
 function renderCompactEventItem(event) {

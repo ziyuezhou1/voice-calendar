@@ -5,6 +5,7 @@ import {
   findMatchingEvents,
   formatDateTime,
   parseVoiceCommand,
+  updateEventFromCommand,
   weekRange,
 } from "../src/calendar-core.js";
 import { getHoliday, getMonthHolidays, hasHolidayData } from "../src/holiday-data.js";
@@ -100,6 +101,37 @@ function parse(text) {
   const matches = findMatchingEvents([event], command);
   assert.equal(matches.length, 1);
   assert.equal(matches[0].title, "团队周会");
+}
+
+{
+  const event = createEventFromCommand(parse("添加明天下午三点团队周会"), now);
+  const command = parse("把明天下午三点的团队周会改到四点");
+  const matches = findMatchingEvents([event], command);
+  const updated = updateEventFromCommand(matches[0], command, now);
+  assert.equal(command.intent, "update");
+  assert.equal(command.title, "团队周会");
+  assert.equal(formatDateTime(updated.startsAt), "2026-05-30 16:00");
+  assert.equal(updated.reminderMinutes, 10);
+}
+
+{
+  const event = createEventFromCommand(parse("添加下周五下午三点产品评审"), now);
+  const command = parse("把周五的产品评审提前到上午十点");
+  const matches = findMatchingEvents([event], command);
+  const updated = updateEventFromCommand(matches[0], command, now);
+  assert.equal(command.intent, "update");
+  assert.equal(formatDateTime(updated.startsAt), "2026-06-05 10:00");
+}
+
+{
+  const event = createEventFromCommand(parse("半小时后提醒喝水"), now);
+  const command = parse("把喝水提醒改成提前十分钟");
+  const matches = findMatchingEvents([event], command);
+  const updated = updateEventFromCommand(matches[0], command, now);
+  assert.equal(command.intent, "update");
+  assert.equal(updated.title, "喝水");
+  assert.equal(formatDateTime(updated.startsAt), "2026-05-29 09:50");
+  assert.equal(updated.reminderMinutes, 10);
 }
 
 {

@@ -27,6 +27,7 @@ const WEEKDAY_ALIASES = {
 
 const INTENT_WORDS = {
   add: ["添加", "新增", "新建", "创建", "安排", "记一下", "记下", "提醒我", "帮我记", "帮我加", "加个", "加一个", "加一条", "预约"],
+  update: ["修改", "改到", "改成", "改为", "调整到", "调整为", "换到", "挪到", "提前到", "推迟到", "延后到", "改提醒"],
   delete: ["删除", "取消", "移除", "删掉", "去掉", "清除"],
   list: ["查看", "查询", "看看", "列出", "播报", "读一下", "今天有什么", "日程", "安排"],
 };
@@ -110,6 +111,7 @@ function cloneDate(dateLike) {
 
 function inferIntent(text) {
   const normalized = normalizeCommand(text);
+  if (INTENT_WORDS.update.some((word) => normalized.includes(word))) return "update";
   if (INTENT_WORDS.delete.some((word) => normalized.includes(word))) return "delete";
   if (INTENT_WORDS.list.some((word) => normalized.includes(word))) {
     const addOnly = INTENT_WORDS.add.some((word) => normalized.includes(word));
@@ -195,11 +197,14 @@ function parseClockTime(text) {
   const colon = text.match(/(凌晨|早上|上午|中午|下午|傍晚|晚上|今晚)?\s*(\d{1,2})[:：](\d{1,2})/);
   if (colon) {
     const meridiem = colon[1] || inferLooseMeridiem(text, colon.index);
+    const rawHour = Number(colon[2]);
     return {
-      hour: applyMeridiem(Number(colon[2]), meridiem),
+      hour: applyMeridiem(rawHour, meridiem),
+      rawHour,
       minute: Number(colon[3]),
       tokens: [colon[0]],
       precision: "minute",
+      hasMeridiem: Boolean(meridiem),
     };
   }
 
@@ -214,12 +219,15 @@ function parseClockTime(text) {
   else if (minuteToken) minute = chineseToNumber(minuteToken);
 
   const meridiem = natural[1] || inferLooseMeridiem(text, natural.index);
+  const rawHour = chineseToNumber(natural[2]);
 
   return {
-    hour: applyMeridiem(chineseToNumber(natural[2]), meridiem),
+    hour: applyMeridiem(rawHour, meridiem),
+    rawHour,
     minute,
     tokens: [natural[0]],
     precision: "minute",
+    hasMeridiem: Boolean(meridiem),
   };
 }
 
@@ -237,12 +245,14 @@ function applyMeridiem(hour, meridiem = "") {
   return hour;
 }
 
-function parseReminder(text) {
+function parseReminder(text, options = {}) {
+  const defaultReminderMinutes = options.defaultReminderMinutes ?? 10;
+  const useDefault = options.useDefault !== false;
   if (/不提醒|无需提醒/.test(text)) return { reminderMinutes: null, tokens: [text.match(/不提醒|无需提醒/)?.[0]] };
   if (/准时提醒|到点提醒/.test(text)) return { reminderMinutes: 0, tokens: [text.match(/准时提醒|到点提醒/)?.[0]] };
 
-  const relative = text.match(/提前\s*([半一二两三四五六七八九十\d]+)\s*(分钟|小时|天)\s*提醒?/);
-  if (!relative) return { reminderMinutes: 10, tokens: [] };
+  const relative = text.match(/提前\s*([半一二两三四五六七八九十\d]+)\s*(分钟|小时|天)(?:\s*提醒)?/);
+  if (!relative) return { reminderMinutes: useDefault ? defaultReminderMinutes : undefined, tokens: [] };
 
   const amount = chineseToNumber(relative[1]);
   const unit = relative[2];
@@ -250,17 +260,19 @@ function parseReminder(text) {
   return { reminderMinutes: amount * multiplier, tokens: [relative[0]] };
 }
 
-function buildDateTime(text, baseDate) {
+function buildDateTime(text, baseDate, options = {}) {
   const relativeTime = parseRelativeTime(text, baseDate);
   if (relativeTime) return { startsAt: relativeTime.date, tokens: relativeTime.tokens, precision: relativeTime.precision, hasDate: true, hasTime: true };
 
   const datePart = parseDatePart(text, baseDate);
   const clock = parseClockTime(text);
-  const startsAt = datePart ? startOfDay(datePart.date) : startOfDay(baseDate);
+  const defaultDate = options.defaultDate || baseDate;
+  const startsAt = datePart ? startOfDay(datePart.date) : startOfDay(defaultDate);
 
   if (clock) {
-    startsAt.setHours(clock.hour, clock.minute, 0, 0);
-    if (!datePart && startsAt <= baseDate) startsAt.setDate(startsAt.getDate() + 1);
+    const inferredHour = inferUpdateMeridiem(clock, options.inferMeridiemFrom);
+    startsAt.setHours(inferredHour, clock.minute, 0, 0);
+    if (!datePart && options.rollForwardTimeOnly !== false && startsAt <= baseDate) startsAt.setDate(startsAt.getDate() + 1);
     return {
       startsAt,
       tokens: [...(datePart?.tokens || []), ...clock.tokens],
@@ -284,6 +296,13 @@ function buildDateTime(text, baseDate) {
   return { startsAt: null, tokens: [], precision: "unknown", hasDate: false, hasTime: false };
 }
 
+function inferUpdateMeridiem(clock, referenceDate) {
+  if (!referenceDate || clock.hasMeridiem || !Number.isFinite(clock.rawHour)) return clock.hour;
+  const referenceHour = new Date(referenceDate).getHours();
+  if (referenceHour >= 12 && clock.rawHour > 0 && clock.rawHour < 12) return clock.rawHour + 12;
+  return clock.hour;
+}
+
 function removeKnownTokens(text, tokens) {
   return tokens.reduce((acc, token) => (token ? acc.replace(token, " ") : acc), text);
 }
@@ -291,9 +310,10 @@ function removeKnownTokens(text, tokens) {
 function extractTitle(text, tokens = []) {
   let title = removeKnownTokens(text, tokens);
   title = title
-    .replace(/^(请|麻烦|帮我|我要|我想|给我|在|于|到时候|日历里|日历上|日历)\s*/g, " ")
+    .replace(/^(请|麻烦|帮我|我要|我想|给我|把|将|在|于|到时候|日历里|日历上|日历)\s*/g, " ")
     .replace(/(^|\s)(我|我的|一下)(?=\s|$)/g, " ")
     .replace(/(添加|新增|新建|创建|安排|记一下|记下|预约|提醒我|帮我记|帮我加|加个|加一个|加一条|提醒|事件|日程)/g, " ")
+    .replace(/(修改|改到|改成|改为|调整到|调整为|换到|挪到|提前到|推迟到|延后到|改提醒|改名|名字|名称|标题)/g, " ")
     .replace(/(删除|取消|移除|删掉|去掉|清除|查看|查询|看看|列出|播报|读一下)/g, " ")
     .replace(/(今天|今日|明天|明日|后天|大后天|本周|这周|下周|下下周|周[一二三四五六日天末]|星期[一二三四五六日天末]|礼拜[一二三四五六日天末])/g, " ")
     .replace(/(上午|下午|晚上|今晚|早上|中午|凌晨|傍晚)/g, " ")
@@ -302,6 +322,31 @@ function extractTitle(text, tokens = []) {
     .replace(/\s+/g, " ")
     .trim();
   return title || "未命名事项";
+}
+
+function splitUpdateCommand(text) {
+  const match = text.match(/(.+?)(改到|改成|改为|调整到|调整为|换到|挪到|提前到|推迟到|延后到|改提醒为|修改为|改名为|改名成|改叫)(.+)/);
+  if (!match) return null;
+  return {
+    targetText: cleanUpdateTargetText(match[1]),
+    updateText: match[3].trim(),
+  };
+}
+
+function cleanUpdateTargetText(text) {
+  return text
+    .replace(/^(请|麻烦)?\s*(帮我)?\s*(把|将)?\s*/, "")
+    .replace(/^(修改|调整)\s*/, "")
+    .replace(/的/g, " ")
+    .trim();
+}
+
+function parseUpdateTitle(text, tokens = []) {
+  if (/(提醒|提前|准时|到点|不提醒|无需提醒)/.test(text)) return null;
+  const title = extractTitle(text, tokens)
+    .replace(/^(叫|为|成)\s*/, "")
+    .trim();
+  return title && title !== "未命名事项" ? title : null;
 }
 
 function getRange(text, baseDate) {
@@ -369,6 +414,65 @@ export function parseVoiceCommand(input, options = {}) {
     };
   }
 
+  if (intent === "update") {
+    const parts = splitUpdateCommand(text);
+    if (!parts) {
+      return {
+        intent,
+        rawText: input,
+        normalizedText: text,
+        title: "未命名事项",
+        startsAt: null,
+        updates: {},
+        confidence: 0.32,
+        missing: ["target", "update"],
+      };
+    }
+
+    const targetDateTime = buildDateTime(parts.targetText, now);
+    const title = extractTitle(parts.targetText, targetDateTime.tokens);
+    const updateBase = targetDateTime.startsAt || now;
+    const updateDateTime = buildDateTime(parts.updateText, updateBase, {
+      defaultDate: updateBase,
+      inferMeridiemFrom: targetDateTime.startsAt,
+      rollForwardTimeOnly: false,
+    });
+    const reminder = parseReminder(parts.updateText, { useDefault: false });
+    const updateTokens = [...updateDateTime.tokens, ...reminder.tokens];
+    const updates = {};
+
+    if (updateDateTime.startsAt) {
+      updates.startsAt = updateDateTime.startsAt;
+      updates.hasDate = updateDateTime.hasDate;
+      updates.hasTime = updateDateTime.hasTime;
+    }
+    if (reminder.reminderMinutes !== undefined) {
+      updates.reminderMinutes = reminder.reminderMinutes;
+    }
+
+    const updatedTitle = parseUpdateTitle(parts.updateText, updateTokens);
+    if (!Object.keys(updates).length && updatedTitle) {
+      updates.title = updatedTitle;
+    }
+
+    const missing = [];
+    if (title === "未命名事项" && !targetDateTime.startsAt) missing.push("target");
+    if (!Object.keys(updates).length) missing.push("update");
+
+    return {
+      intent,
+      rawText: input,
+      normalizedText: text,
+      title,
+      startsAt: targetDateTime.startsAt,
+      hasDate: targetDateTime.hasDate,
+      hasTime: targetDateTime.hasTime,
+      updates,
+      confidence: missing.length ? 0.42 : 0.82,
+      missing,
+    };
+  }
+
   if (intent === "add") {
     const dateTime = buildDateTime(text, now);
     const reminder = parseReminder(text);
@@ -413,6 +517,54 @@ export function createEventFromCommand(command, now = new Date()) {
     createdAt: new Date(now).toISOString(),
     notifiedAt: null,
   };
+}
+
+export function updateEventFromCommand(event, command, now = new Date()) {
+  if (command.intent !== "update" || command.missing?.length) {
+    throw new Error("Cannot update event from incomplete command");
+  }
+
+  const updates = command.updates || {};
+  const next = { ...event };
+  let startsAtChanged = false;
+  let reminderChanged = false;
+
+  if (updates.startsAt) {
+    const mergedStartsAt = mergeUpdatedStartsAt(event.startsAt, updates);
+    startsAtChanged = mergedStartsAt.getTime() !== new Date(event.startsAt).getTime();
+    next.startsAt = mergedStartsAt.toISOString();
+  }
+
+  if (Object.prototype.hasOwnProperty.call(updates, "reminderMinutes")) {
+    reminderChanged = event.reminderMinutes !== updates.reminderMinutes;
+    next.reminderMinutes = updates.reminderMinutes;
+  }
+
+  if (updates.title) {
+    next.title = updates.title;
+  }
+
+  return {
+    ...next,
+    sourceText: command.rawText,
+    updatedAt: new Date(now).toISOString(),
+    notifiedAt: startsAtChanged || reminderChanged ? null : event.notifiedAt,
+  };
+}
+
+function mergeUpdatedStartsAt(currentStartsAt, updates) {
+  const current = new Date(currentStartsAt);
+  const parsed = new Date(updates.startsAt);
+  const next = new Date(current);
+
+  if (updates.hasDate) {
+    next.setFullYear(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+  }
+  if (updates.hasTime) {
+    next.setHours(parsed.getHours(), parsed.getMinutes(), 0, 0);
+  }
+
+  return next;
 }
 
 export function filterEvents(events, range) {
