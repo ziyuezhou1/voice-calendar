@@ -80,6 +80,8 @@ git push origin android-v0.1.0
 
 推送 `android-v*` 标签后，GitHub Actions 会构建 debug-signed APK，并自动创建 GitHub Release。该 APK 适合真机评审和演示；正式上架前需要补充 release signing。
 
+Android 版默认使用系统键盘语音输入：点击绿色按钮后聚焦命令输入框并弹出系统键盘，用户可点击键盘上的麦克风录入语音，再点“执行”。这样不依赖 `SpeechRecognizer` 是否向第三方 App 暴露，能覆盖更多国产 Android 机型。原生 `SpeechRecognizer` 接入保留为调试增强，可在入口 URL 加 `?nativeSpeech=1` 时尝试启用。
+
 ## 依赖说明
 
 Web 版没有引入第三方运行时库或框架，依赖能力来自浏览器和 Node.js；Android 版新增 Capacitor 相关依赖：
