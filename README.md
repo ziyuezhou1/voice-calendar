@@ -80,6 +80,8 @@ git push origin android-v0.1.0
 
 推送 `android-v*` 标签后，GitHub Actions 会构建 debug-signed APK，并自动创建 GitHub Release。该 APK 适合真机评审和演示；正式上架前需要补充 release signing。
 
+Android 版会优先打开系统语音识别面板；如果设备不暴露 `SpeechRecognizer` 服务，也会尝试通过系统识别 Activity 获取语音文本。若仍提示“没有可用的系统语音识别服务”，通常表示当前设备没有安装或启用可供第三方 App 调用的语音识别组件。可尝试安装/启用 Google App、系统语音助手或带语音输入能力的输入法；App 会自动降级到系统键盘语音输入，仍可把语音转成文字后执行日程命令。
+
 ## 依赖说明
 
 Web 版没有引入第三方运行时库或框架，依赖能力来自浏览器和 Node.js；Android 版新增 Capacitor 相关依赖：
