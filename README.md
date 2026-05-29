@@ -62,10 +62,13 @@ npm test
 本项目没有引入第三方运行时库或框架，依赖能力均来自浏览器和 Node.js：
 
 - Web Speech API：浏览器语音识别，部分浏览器可能不支持。
+- MediaDevices.getUserMedia：启动语音前用于请求和校验麦克风权限。
 - SpeechSynthesis：浏览器语音播报。
 - Notification API：系统通知，可由用户授权开启。
 - LocalStorage：本地事件存储。
 - Node.js：仅用于本地静态服务器和测试脚本。
+
+语音识别需要 HTTPS 或 localhost 环境，并依赖浏览器自身的语音服务。若浏览器提示权限、麦克风、网络或未检测到语音问题，可先使用文字命令完成同样操作。
 
 ## 节假日数据
 
