@@ -76,6 +76,8 @@ const examples = [
   "切换到春天主题",
 ];
 
+const ENABLE_NATIVE_SPEECH = new URLSearchParams(window.location.search).get("nativeSpeech") === "1";
+
 let events = loadEvents();
 let activeRange = dayRange(new Date(), "今天");
 let calendarCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
@@ -110,7 +112,10 @@ function init() {
   applyTheme(settings.theme || "light", { persist: false });
   render();
   scheduleReminderChecks();
-  logAssistant("可以直接说：添加明天下午三点团队周会，提前二十分钟提醒我。信息不完整时，我会继续追问。", "hint");
+  const hint = systemVoiceInputMode
+    ? "安卓端已启用系统键盘语音输入。点击绿色按钮后，在弹出的键盘上点麦克风，说完再点执行。"
+    : "可以直接说：添加明天下午三点团队周会，提前二十分钟提醒我。信息不完整时，我会继续追问。";
+  logAssistant(hint, "hint");
 }
 
 function bindEvents() {
@@ -146,6 +151,16 @@ function bindEvents() {
 }
 
 function setupSpeechRecognition() {
+  if (isAndroidApp() && !ENABLE_NATIVE_SPEECH) {
+    nativeSpeechSupported = false;
+    systemVoiceInputMode = true;
+    SpeechRecognitionConstructor = null;
+    updateSpeechSupportStatus();
+    elements.micButton.disabled = false;
+    updateMicButtonLabel();
+    return;
+  }
+
   nativeSpeechSupported = hasNativeSpeechRecognition();
   SpeechRecognitionConstructor = window.SpeechRecognition || window.webkitSpeechRecognition;
   const speechSupported = nativeSpeechSupported || Boolean(SpeechRecognitionConstructor);
@@ -153,6 +168,14 @@ function setupSpeechRecognition() {
   elements.micButton.disabled = !speechSupported;
   updateMicButtonLabel();
   if (!nativeSpeechSupported && speechSupported) refreshMicrophonePermissionStatus();
+}
+
+function isAndroidApp() {
+  const capacitor = window.Capacitor;
+  if (!capacitor) return false;
+  const platform = typeof capacitor.getPlatform === "function" ? capacitor.getPlatform() : "";
+  const native = typeof capacitor.isNativePlatform === "function" ? capacitor.isNativePlatform() : platform === "android";
+  return native && platform === "android";
 }
 
 async function refreshMicrophonePermissionStatus() {
