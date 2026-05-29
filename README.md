@@ -21,6 +21,7 @@ GitHub Pages: https://ziyuezhou1.github.io/voice-calendar/
 - 中文命令解析：支持相对日期、周几、显式日期、上午/下午、半小时后、提前提醒。
 - 日历操作：支持添加、删除、查看今天/明天/本周/本月/全部日程。
 - 本地提醒：页面内 Toast、语音播报，可选浏览器系统通知。
+- 主题切换：支持浅色、深色、春、夏、秋、冬六种主题，并保存用户偏好。
 - 本地存储：事件保存在 LocalStorage，刷新页面后仍可查看。
 - 可测试核心：自然语言解析和事件匹配逻辑位于 `src/calendar-core.js`，配有 Node 测试。
 
@@ -33,6 +34,8 @@ GitHub Pages: https://ziyuezhou1.github.io/voice-calendar/
 查看今天日程
 查询本周安排
 取消明天下午三点团队周会
+切换到深色主题
+换成春天主题
 ```
 
 ## 运行方式

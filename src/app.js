@@ -6,17 +6,39 @@ import {
   formatDateKey,
   formatDateTime,
   monthRange,
+  normalizeCommand,
   parseVoiceCommand,
   weekRange,
-} from "./calendar-core.js";
+} from "./calendar-core.js?v=theme-fix-2";
 
 const STORE_KEY = "voice-calendar-events-v1";
 const SETTINGS_KEY = "voice-calendar-settings-v1";
+
+const THEMES = {
+  light: "浅色",
+  dark: "深色",
+  spring: "春",
+  summer: "夏",
+  autumn: "秋",
+  winter: "冬",
+};
+
+const THEME_ALIASES = [
+  [/浅色|亮色|白天|日间|默认/, "light"],
+  [/深色|暗色|黑色|夜间|夜晚/, "dark"],
+  [/春天|春季|春/, "spring"],
+  [/夏天|夏季|夏/, "summer"],
+  [/秋天|秋季|秋/, "autumn"],
+  [/冬天|冬季|冬/, "winter"],
+];
 
 const elements = {
   micButton: document.querySelector("[data-action='toggle-voice']"),
   runButton: document.querySelector("[data-action='run-command']"),
   notificationButton: document.querySelector("[data-action='enable-notifications']"),
+  themeButton: document.querySelector("[data-action='toggle-theme-menu']"),
+  themeMenu: document.querySelector("#theme-menu"),
+  themeButtons: document.querySelectorAll("[data-theme-option]"),
   clearButton: document.querySelector("[data-action='clear-transcript']"),
   transcript: document.querySelector("#transcript"),
   voiceStatus: document.querySelector("#voice-status"),
@@ -39,6 +61,7 @@ const examples = [
   "查看今天日程",
   "查询本周安排",
   "取消明天下午三点团队周会",
+  "切换到春天主题",
 ];
 
 let events = loadEvents();
@@ -54,6 +77,7 @@ function init() {
   setupSpeechRecognition();
   renderExamples();
   bindEvents();
+  applyTheme(settings.theme || "light", { persist: false });
   render();
   scheduleReminderChecks();
   logAssistant("可以直接说：添加明天下午三点团队周会，提前二十分钟提醒我。", "hint");
@@ -67,6 +91,14 @@ function bindEvents() {
     elements.transcript.focus();
   });
   elements.notificationButton.addEventListener("click", requestNotificationPermission);
+  elements.themeButton.addEventListener("click", toggleThemeMenu);
+  elements.themeMenu.addEventListener("click", handleThemeMenuClick);
+  document.addEventListener("click", (event) => {
+    if (!(event.target instanceof Element) || !event.target.closest(".theme-switcher")) closeThemeMenu();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeThemeMenu();
+  });
   elements.transcript.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -145,6 +177,13 @@ function handleCommand(rawText) {
     return;
   }
 
+  const theme = parseThemeCommand(text);
+  if (theme) {
+    applyTheme(theme, { announce: true });
+    closeThemeMenu();
+    return;
+  }
+
   const command = parseVoiceCommand(text, { now: new Date() });
   if (command.intent === "add") {
     handleAdd(command);
@@ -162,6 +201,60 @@ function handleCommand(rawText) {
   const fallback = "我还没理解这条命令。可以说：添加明天下午三点开会，或查看今天日程。";
   logAssistant(fallback, "warning");
   speak(fallback);
+}
+
+function parseThemeCommand(text) {
+  const normalized = normalizeCommand(text).replace(/\s+/g, "");
+  if (!/(主题|模式|皮肤|换肤|切换|换成|调成|改成)/.test(normalized)) return null;
+  const match = THEME_ALIASES.find(([pattern]) => pattern.test(normalized));
+  return match?.[1] || null;
+}
+
+function toggleThemeMenu(event) {
+  event.stopPropagation();
+  const expanded = elements.themeButton.getAttribute("aria-expanded") === "true";
+  if (expanded) {
+    closeThemeMenu();
+    return;
+  }
+  elements.themeMenu.hidden = false;
+  elements.themeButton.setAttribute("aria-expanded", "true");
+}
+
+function closeThemeMenu() {
+  elements.themeMenu.hidden = true;
+  elements.themeButton.setAttribute("aria-expanded", "false");
+}
+
+function handleThemeMenuClick(event) {
+  if (!(event.target instanceof Element)) return;
+  const button = event.target.closest("button[data-theme-option]");
+  if (!button) return;
+  applyTheme(button.dataset.themeOption, { announce: true });
+  closeThemeMenu();
+}
+
+function applyTheme(themeId, options = {}) {
+  const theme = Object.prototype.hasOwnProperty.call(THEMES, themeId) ? themeId : "light";
+  document.body.dataset.theme = theme;
+  settings.theme = theme;
+  if (options.persist !== false) saveSettings();
+
+  elements.themeButtons.forEach((button) => {
+    const active = button.dataset.themeOption === theme;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+
+  elements.themeButton.title = `当前主题：${THEMES[theme]}`;
+  elements.themeButton.setAttribute("aria-label", `更换主题，当前为${THEMES[theme]}`);
+
+  if (options.announce) {
+    const message = `已切换到${THEMES[theme]}主题。`;
+    logAssistant(message, "success");
+    showToast(message);
+    speak(message);
+  }
 }
 
 function handleAdd(command) {
@@ -458,7 +551,11 @@ function loadEvents() {
 }
 
 function saveEvents() {
-  localStorage.setItem(STORE_KEY, JSON.stringify(events));
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify(events));
+  } catch {
+    logAssistant("浏览器暂时无法写入本地日程，当前页面仍可继续使用。", "warning");
+  }
 }
 
 function loadSettings() {
@@ -470,7 +567,11 @@ function loadSettings() {
 }
 
 function saveSettings() {
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  } catch {
+    logAssistant("浏览器暂时无法保存设置，本次主题切换仍会立即生效。", "warning");
+  }
 }
 
 function addDays(dateLike, days) {
