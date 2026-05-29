@@ -8,14 +8,14 @@ export async function startNativeSpeechRecognition({ onPartialResult, onStatus }
   const plugin = getNativeSpeechPlugin();
   if (!plugin) throw createSpeechError("native-unavailable", "当前运行环境没有 Android 原生语音识别插件。");
 
+  const permission = await ensureNativeSpeechPermission(plugin, onStatus);
+  if (!isPermissionGranted(permission)) {
+    throw createSpeechError("native-permission-denied", "请先允许 App 使用麦克风权限。");
+  }
+
   const available = await plugin.available?.();
   if (available && available.available === false) {
     throw createSpeechError("native-service-unavailable", "当前设备没有可用的系统语音识别服务。");
-  }
-
-  const permission = await ensureNativeSpeechPermission(plugin);
-  if (!isPermissionGranted(permission)) {
-    throw createSpeechError("native-permission-denied", "请先允许 App 使用麦克风权限。");
   }
 
   await plugin.removeAllListeners?.();
@@ -74,9 +74,10 @@ function isNativeRuntime() {
   return platform === "android" || platform === "ios";
 }
 
-async function ensureNativeSpeechPermission(plugin) {
+async function ensureNativeSpeechPermission(plugin, onStatus) {
   const current = await plugin.checkPermissions?.();
   if (isPermissionGranted(current)) return current;
+  onStatus?.("正在请求麦克风权限，请在系统弹窗中选择允许");
   return plugin.requestPermissions?.();
 }
 
