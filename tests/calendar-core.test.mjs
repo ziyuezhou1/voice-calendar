@@ -25,6 +25,40 @@ function parse(text) {
 }
 
 {
+  const command = parse("帮我加个明天下午开会");
+  assert.equal(command.intent, "add");
+  assert.equal(command.title, "开会");
+  assert.equal(formatDateTime(command.startsAt), "2026-05-30 09:00");
+  assert.equal(command.hasDate, true);
+  assert.equal(command.hasTime, false);
+}
+
+{
+  const command = parse("帮我加个明天下午开会 三点");
+  assert.equal(command.intent, "add");
+  assert.equal(command.title, "开会");
+  assert.equal(formatDateTime(command.startsAt), "2026-05-30 15:00");
+  assert.equal(command.hasDate, true);
+  assert.equal(command.hasTime, true);
+}
+
+{
+  const command = parse("添加下午三点开会");
+  assert.equal(command.intent, "add");
+  assert.equal(command.title, "开会");
+  assert.equal(command.hasDate, false);
+  assert.equal(command.hasTime, true);
+}
+
+{
+  const command = parse("添加明天下午三点");
+  assert.equal(command.intent, "add");
+  assert.equal(command.title, "未命名事项");
+  assert.equal(command.hasDate, true);
+  assert.equal(command.hasTime, true);
+}
+
+{
   const command = parse("下周五上午十点半安排产品评审");
   assert.equal(command.intent, "add");
   assert.equal(command.title, "产品评审");

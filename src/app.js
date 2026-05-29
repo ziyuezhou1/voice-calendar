@@ -9,7 +9,7 @@ import {
   normalizeCommand,
   parseVoiceCommand,
   weekRange,
-} from "./calendar-core.js?v=calendar-nav-1";
+} from "./calendar-core.js?v=multi-turn-1";
 import { getHoliday, getMonthHolidays, hasHolidayData, HOLIDAY_SOURCE } from "./holiday-data.js";
 
 const STORE_KEY = "voice-calendar-events-v1";
@@ -61,6 +61,7 @@ const elements = {
 
 const examples = [
   "添加明天下午三点团队周会，提前二十分钟提醒我",
+  "帮我加个明天下午开会",
   "下周五上午十点半安排产品评审",
   "半小时后提醒喝水",
   "查看今天日程",
@@ -76,6 +77,7 @@ let recognition = null;
 let listening = false;
 let toastTimer = null;
 let settings = loadSettings();
+let pendingAdd = null;
 
 init();
 
@@ -87,7 +89,7 @@ function init() {
   applyTheme(settings.theme || "light", { persist: false });
   render();
   scheduleReminderChecks();
-  logAssistant("可以直接说：添加明天下午三点团队周会，提前二十分钟提醒我。", "hint");
+  logAssistant("可以直接说：添加明天下午三点团队周会，提前二十分钟提醒我。信息不完整时，我会继续追问。", "hint");
 }
 
 function bindEvents() {
@@ -190,6 +192,22 @@ function handleCommand(rawText) {
   }
 
   const theme = parseThemeCommand(text);
+  if (pendingAdd) {
+    if (isPendingCancel(text)) {
+      cancelPendingAdd();
+      return;
+    }
+
+    const standaloneCommand = parseVoiceCommand(text, { now: new Date() });
+    if (theme || standaloneCommand.intent === "delete" || standaloneCommand.intent === "list") {
+      pendingAdd = null;
+      logAssistant("已结束上一次待补全的日程。", "info");
+    } else {
+      continuePendingAdd(text);
+      return;
+    }
+  }
+
   if (theme) {
     applyTheme(theme, { announce: true });
     closeThemeMenu();
@@ -213,6 +231,18 @@ function handleCommand(rawText) {
   const fallback = "我还没理解这条命令。可以说：添加明天下午三点开会，或查看今天日程。";
   logAssistant(fallback, "warning");
   speak(fallback);
+}
+
+function isPendingCancel(text) {
+  return /^(取消|算了|不用了|先不加|不加了|不要了|停止|结束)$/.test(normalizeCommand(text).replace(/\s+/g, ""));
+}
+
+function cancelPendingAdd() {
+  pendingAdd = null;
+  const message = "好的，已取消这条待补全的日程。";
+  elements.voiceStatus.textContent = "待命中";
+  logAssistant(message, "info");
+  speak(message);
 }
 
 function parseThemeCommand(text) {
@@ -270,13 +300,13 @@ function applyTheme(themeId, options = {}) {
 }
 
 function handleAdd(command) {
-  if (command.missing.includes("dateTime")) {
-    const message = "我还缺少日期和时间。试试：添加明天下午三点团队周会。";
-    logAssistant(message, "warning");
-    speak(message);
+  const missingSlots = getMissingAddSlots(command);
+  if (missingSlots.length) {
+    startPendingAdd(command, missingSlots[0]);
     return;
   }
 
+  pendingAdd = null;
   const event = createEventFromCommand(command);
   events = [...events, event];
   saveEvents();
@@ -290,6 +320,55 @@ function handleAdd(command) {
   logAssistant(message, "success");
   showToast(message);
   speak(message);
+}
+
+function continuePendingAdd(text) {
+  const combinedText = `${pendingAdd.text} ${text}`.trim();
+  pendingAdd = null;
+
+  const command = parseVoiceCommand(combinedText, { now: new Date() });
+  if (command.intent !== "add") {
+    const message = "这次补充没有接上刚才的日程。可以重新说完整命令，例如：添加明天下午三点开会。";
+    logAssistant(message, "warning");
+    speak(message);
+    return;
+  }
+
+  handleAdd(command);
+}
+
+function startPendingAdd(command, slot) {
+  pendingAdd = {
+    text: command.rawText,
+    askedSlot: slot,
+  };
+  askMissingAddSlot(slot);
+}
+
+function askMissingAddSlot(slot) {
+  const questions = {
+    date: "我还缺少日期。你想安排在哪一天？",
+    time: "我还缺少时间。你想安排几点？",
+    title: "我还缺少事项名称。这条日程叫什么？",
+  };
+  const message = questions[slot] || "我还缺少一些信息，请再补充一下。";
+  elements.voiceStatus.textContent = message;
+  logAssistant(message, "hint");
+  speak(message);
+}
+
+function getMissingAddSlots(command) {
+  const slots = [];
+  if (!command.startsAt || command.missing?.includes("dateTime")) {
+    if (!command.hasDate) slots.push("date");
+    if (!command.hasTime) slots.push("time");
+    if (!slots.length) slots.push("date");
+  } else {
+    if (!command.hasDate) slots.push("date");
+    if (!command.hasTime) slots.push("time");
+  }
+  if (command.title === "未命名事项") slots.push("title");
+  return [...new Set(slots)];
 }
 
 function handleDelete(command) {
