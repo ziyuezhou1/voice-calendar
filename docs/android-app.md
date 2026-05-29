@@ -19,6 +19,7 @@
 
 - `src/speech-adapter.js`：封装 Android 原生语音识别插件，负责可用性检查、权限请求、partial results 和最终识别文本。
 - `src/app.js`：优先检测 Capacitor 原生环境；Android App 中走原生识别，Web 页面继续走浏览器识别。
+- `android/app/src/main/java/io/github/ziyuezhou1/voicecalendar/IntentSpeechPlugin.java`：本地 Capacitor 插件，直接打开系统 `ACTION_RECOGNIZE_SPEECH` 语音识别面板，覆盖部分机型不暴露 `RecognitionService` 的情况。
 - `capacitor.config.json`：声明 App ID、应用名和 `www` Web 资产目录。
 - `tools/build-web.mjs`：把静态 Web 文件复制到 `www/`，供 Capacitor 同步到 Android 工程。
 - `android/app/src/main/AndroidManifest.xml`：声明 `RECORD_AUDIO` 权限，并显式查询 `android.speech.RecognitionService`，避免 Android 11+ 包可见性导致系统语音服务被误判为不可用。

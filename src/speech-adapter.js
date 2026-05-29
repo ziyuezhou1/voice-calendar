@@ -1,32 +1,42 @@
 const NATIVE_LANGUAGE = "zh-CN";
 
 export function hasNativeSpeechRecognition() {
-  return Boolean(isNativeRuntime() && getNativeSpeechPlugin());
+  return Boolean(isNativeRuntime() && (getIntentSpeechPlugin() || getNativeSpeechPlugin()));
 }
 
 export async function startNativeSpeechRecognition({ onPartialResult, onStatus } = {}) {
-  const plugin = getNativeSpeechPlugin();
-  if (!plugin) throw createSpeechError("native-unavailable", "当前运行环境没有 Android 原生语音识别插件。");
+  const servicePlugin = getNativeSpeechPlugin();
+  const intentPlugin = getIntentSpeechPlugin();
+  if (!servicePlugin && !intentPlugin) throw createSpeechError("native-unavailable", "当前运行环境没有 Android 原生语音识别插件。");
 
-  const permission = await ensureNativeSpeechPermission(plugin, onStatus);
-  if (!isPermissionGranted(permission)) {
-    throw createSpeechError("native-permission-denied", "请先允许 App 使用麦克风权限。");
+  if (servicePlugin) {
+    const permission = await ensureNativeSpeechPermission(servicePlugin, onStatus);
+    if (!isPermissionGranted(permission)) {
+      throw createSpeechError("native-permission-denied", "请先允许 App 使用麦克风权限。");
+    }
   }
 
-  const available = await plugin.available?.();
+  if (intentPlugin) {
+    const result = await startIntentSpeechRecognition(intentPlugin, onStatus);
+    if (result.text) return result;
+  }
+
+  if (!servicePlugin) throw createSpeechError("native-service-unavailable", "当前设备没有可用的系统语音识别服务。");
+
+  const available = await servicePlugin.available?.();
   if (available && available.available === false) {
     throw createSpeechError("native-service-unavailable", "当前设备没有可用的系统语音识别服务。");
   }
 
-  await plugin.removeAllListeners?.();
-  const listener = await plugin.addListener?.("partialResults", (data) => {
+  await servicePlugin.removeAllListeners?.();
+  const listener = await servicePlugin.addListener?.("partialResults", (data) => {
     const text = normalizeMatches(data?.matches)[0] || "";
     if (text) onPartialResult?.(text);
   });
 
   try {
     onStatus?.("Android 原生语音识别已启动，请说出日程命令");
-    const result = await plugin.start({
+    const result = await servicePlugin.start({
       language: NATIVE_LANGUAGE,
       maxResults: 1,
       partialResults: true,
@@ -41,9 +51,9 @@ export async function startNativeSpeechRecognition({ onPartialResult, onStatus }
 }
 
 export async function stopNativeSpeechRecognition() {
-  const plugin = getNativeSpeechPlugin();
-  if (!plugin?.stop) return;
-  await plugin.stop();
+  const servicePlugin = getNativeSpeechPlugin();
+  if (!servicePlugin?.stop) return;
+  await servicePlugin.stop();
 }
 
 export function getSpeechAdapterErrorMessage(error) {
@@ -64,6 +74,34 @@ function getNativeSpeechPlugin() {
     return capacitor.registerPlugin("SpeechRecognition");
   }
   return capacitor.Plugins?.SpeechRecognition || null;
+}
+
+function getIntentSpeechPlugin() {
+  const capacitor = window.Capacitor;
+  if (!capacitor) return null;
+  if (!capacitor.Plugins?.IntentSpeech && typeof capacitor.registerPlugin === "function") {
+    return capacitor.registerPlugin("IntentSpeech");
+  }
+  return capacitor.Plugins?.IntentSpeech || null;
+}
+
+async function startIntentSpeechRecognition(plugin, onStatus) {
+  try {
+    const available = await plugin.available?.();
+    if (available && available.available === false) return { text: "" };
+
+    onStatus?.("正在打开系统语音识别面板，请说出日程命令");
+    const result = await plugin.start({
+      language: NATIVE_LANGUAGE,
+      maxResults: 1,
+      prompt: "请说出日程命令",
+    });
+    const text = normalizeMatches(result?.matches)[0] || "";
+    return { text };
+  } catch (error) {
+    if (error?.code === "intent-cancelled") return { text: "" };
+    return { text: "" };
+  }
 }
 
 function isNativeRuntime() {
