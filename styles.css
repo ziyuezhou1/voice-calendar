@@ -212,7 +212,8 @@ body {
 }
 
 button,
-textarea {
+textarea,
+input {
   font: inherit;
 }
 
@@ -226,7 +227,8 @@ button:disabled {
 }
 
 button:focus-visible,
-textarea:focus-visible {
+textarea:focus-visible,
+input:focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
@@ -315,6 +317,39 @@ svg {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.account-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 220px;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 12px 0 8px;
+  color: var(--ink);
+  background: var(--control);
+}
+
+.account-button span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-avatar {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: var(--on-accent);
+  background: var(--teal);
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .theme-switcher {
@@ -1101,6 +1136,102 @@ body[data-listening="true"] .voice-meter span:nth-child(5) {
   transform: translateY(0);
 }
 
+.account-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  background: rgba(16, 20, 25, 0.42);
+}
+
+.account-modal[hidden] {
+  display: none;
+}
+
+.account-card {
+  width: min(440px, 100%);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px;
+  color: var(--ink);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.account-providers {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.account-providers button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 46px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--control);
+  font-weight: 700;
+}
+
+.account-providers button.active {
+  color: var(--teal-dark);
+  border-color: var(--teal);
+  background: var(--surface-strong);
+}
+
+.account-providers span {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  color: var(--on-accent);
+  background: var(--teal);
+  font-size: 13px;
+}
+
+.account-field {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.account-field span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.account-field input {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 12px;
+  color: var(--ink);
+  background: var(--control);
+}
+
+.account-modal-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.account-note {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 @media (max-width: 1120px) {
   .workspace {
     grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
@@ -1118,6 +1249,12 @@ body[data-listening="true"] .voice-meter span:nth-child(5) {
 
   .topbar {
     align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .top-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
   }
 
   .workspace {
@@ -1159,6 +1296,10 @@ body[data-listening="true"] .voice-meter span:nth-child(5) {
 
   .command-actions {
     display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .account-modal-actions {
     grid-template-columns: 1fr;
   }
 
