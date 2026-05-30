@@ -38,6 +38,7 @@ const SETTINGS_KEY = "voice-calendar-settings-v1";
 const AUTH_SESSION_KEY = "voice-calendar-auth-session-v1";
 const REMINDER_CHECK_INTERVAL_MS = 15000;
 const REMINDER_TOAST_DURATION_MS = 7000;
+const DEMO_EVENT_ID_PREFIX = "demo-";
 
 const THEMES = {
   light: "浅色",
@@ -76,6 +77,7 @@ const elements = {
   themeMenu: document.querySelector("#theme-menu"),
   themeButtons: document.querySelectorAll("[data-theme-option]"),
   clearButton: document.querySelector("[data-action='clear-transcript']"),
+  demoButton: document.querySelector("[data-action='load-demo-events']"),
   transcript: document.querySelector("#transcript"),
   voiceStatus: document.querySelector("#voice-status"),
   supportStatus: document.querySelector("#support-status"),
@@ -175,6 +177,7 @@ function bindEvents() {
     elements.transcript.value = "";
     elements.transcript.focus();
   });
+  elements.demoButton.addEventListener("click", loadDemoEvents);
   elements.notificationButton.addEventListener("click", requestNotificationPermission);
   elements.themeButton.addEventListener("click", toggleThemeMenu);
   elements.themeMenu.addEventListener("click", handleThemeMenuClick);
@@ -984,6 +987,70 @@ function handleAdd(command) {
   logAssistant(message, "success");
   showToast(message);
   speak(message);
+}
+
+function loadDemoEvents() {
+  const now = new Date();
+  const demoEvents = createDemoEvents(now);
+  events = [...events.filter((event) => !String(event.id).startsWith(DEMO_EVENT_ID_PREFIX)), ...demoEvents];
+  pendingAdd = null;
+  pendingDelete = null;
+  saveEvents();
+  activeRange = { type: "all", label: "全部", start: null, end: null };
+  calendarCursor = new Date(now.getFullYear(), now.getMonth(), 1);
+  render();
+
+  const message = `已载入 ${demoEvents.length} 条演示日程，包含 1 分钟后的喝水提醒、明天会议和未来评审。`;
+  logAssistant(message, "success");
+  showToast(message);
+  speak(message);
+}
+
+function createDemoEvents(now) {
+  const createdAt = now.toISOString();
+  const idDateKey = formatDateKey(now);
+  const drinkAt = new Date(now.getTime() + 60000);
+  drinkAt.setSeconds(0, 0);
+  const focusAt = todayOrTomorrowAt(now, 16, 0);
+  const meetingAt = setTime(addDays(now, 1), 10, 0);
+  const reviewAt = setTime(nextWeekday(now, 5), 10, 30);
+  const workoutAt = setTime(addDays(now, 3), 18, 30);
+
+  return [
+    createDemoEvent("drink-water", "喝水", drinkAt, 0, "演示数据：1分钟后提醒喝水", createdAt, idDateKey),
+    createDemoEvent("focus-review", "语音日历演示复盘", focusAt, 15, "演示数据：今天下午四点复盘", createdAt, idDateKey),
+    createDemoEvent("team-meeting", "团队周会", meetingAt, 20, "演示数据：明天上午十点团队周会", createdAt, idDateKey),
+    createDemoEvent("product-review", "产品评审", reviewAt, 30, "演示数据：下一个周五上午十点半产品评审", createdAt, idDateKey),
+    createDemoEvent("workout", "健身课", workoutAt, 10, "演示数据：三天后晚上六点半健身课", createdAt, idDateKey),
+  ];
+}
+
+function createDemoEvent(idSuffix, title, startsAt, reminderMinutes, sourceText, createdAt, idDateKey) {
+  return {
+    id: `${DEMO_EVENT_ID_PREFIX}${idDateKey}-${idSuffix}`,
+    title,
+    startsAt: startsAt.toISOString(),
+    reminderMinutes,
+    sourceText,
+    createdAt,
+    notifiedAt: null,
+  };
+}
+
+function todayOrTomorrowAt(now, hour, minute) {
+  const today = setTime(now, hour, minute);
+  return today > now ? today : setTime(addDays(now, 1), hour, minute);
+}
+
+function nextWeekday(now, weekday) {
+  const delta = (weekday - now.getDay() + 7) % 7 || 7;
+  return addDays(now, delta);
+}
+
+function setTime(dateLike, hour, minute) {
+  const date = new Date(dateLike);
+  date.setHours(hour, minute, 0, 0);
+  return date;
 }
 
 function continuePendingAdd(text) {
