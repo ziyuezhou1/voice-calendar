@@ -20,6 +20,8 @@ import {
 
 const STORE_KEY = "voice-calendar-events-v1";
 const SETTINGS_KEY = "voice-calendar-settings-v1";
+const REMINDER_CHECK_INTERVAL_MS = 15000;
+const REMINDER_TOAST_DURATION_MS = 7000;
 
 const THEMES = {
   light: "浅色",
@@ -1091,7 +1093,12 @@ function updateNotificationButton() {
 
 function scheduleReminderChecks() {
   checkReminders();
-  window.setInterval(checkReminders, 15000);
+  window.setInterval(checkReminders, REMINDER_CHECK_INTERVAL_MS);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") checkReminders();
+  });
+  window.addEventListener("focus", checkReminders);
+  window.addEventListener("pageshow", checkReminders);
 }
 
 function checkReminders() {
@@ -1105,7 +1112,9 @@ function checkReminders() {
     const staleCutoff = new Date(now.getTime() - 24 * 60 * 60000);
     if (remindAt <= now && startsAt >= staleCutoff) {
       const message = `提醒：${event.title}，${formatDateTime(event.startsAt)}。`;
-      showToast(message);
+      showToast(message, { duration: REMINDER_TOAST_DURATION_MS });
+      elements.voiceStatus.textContent = message;
+      logAssistant(message, "warning");
       speak(message);
       sendNotification(event, message);
       changed = true;
@@ -1128,13 +1137,14 @@ function sendNotification(event, message) {
   });
 }
 
-function showToast(message) {
+function showToast(message, options = {}) {
+  const duration = options.duration ?? 3600;
   window.clearTimeout(toastTimer);
   elements.toast.textContent = message;
   elements.toast.classList.add("visible");
   toastTimer = window.setTimeout(() => {
     elements.toast.classList.remove("visible");
-  }, 3600);
+  }, duration);
 }
 
 function speak(text) {

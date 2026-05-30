@@ -70,6 +70,23 @@ function parse(text) {
   assert.equal(command.intent, "add");
   assert.equal(command.title, "喝水");
   assert.equal(formatDateTime(command.startsAt), "2026-05-29 09:50");
+  assert.equal(command.reminderMinutes, 0);
+}
+
+{
+  const command = parse("1分钟后提醒喝水");
+  assert.equal(command.intent, "add");
+  assert.equal(command.title, "喝水");
+  assert.equal(formatDateTime(command.startsAt), "2026-05-29 09:21");
+  assert.equal(command.reminderMinutes, 0);
+}
+
+{
+  const command = parse("1分钟后提醒喝水，提前1分钟提醒我");
+  assert.equal(command.intent, "add");
+  assert.equal(command.title, "喝水");
+  assert.equal(formatDateTime(command.startsAt), "2026-05-29 09:21");
+  assert.equal(command.reminderMinutes, 1);
 }
 
 {
