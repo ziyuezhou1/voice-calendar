@@ -190,7 +190,7 @@
         <div class="panel-heading compact">
           <div>
             <span class="eyebrow">账号</span>
-            <h2 id="account-title">选择登录方式</h2>
+            <h2 id="account-title">手机号登录</h2>
           </div>
           <button class="icon-button small" type="button" data-action="close-account-panel" aria-label="关闭账号面板" title="关闭">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -198,30 +198,31 @@
             </svg>
           </button>
         </div>
-        <div class="account-providers" role="group" aria-label="登录方式">
-          <button type="button" data-provider-option="google" aria-pressed="true">
-            <span>G</span>
-            Google
-          </button>
-          <button type="button" data-provider-option="wechat" aria-pressed="false">
-            <span>微</span>
-            微信
-          </button>
-        </div>
-        <label class="account-field" for="account-identity">
-          <span>账号标识</span>
-          <input id="account-identity" type="text" autocomplete="username" placeholder="name@gmail.com" />
+        <label class="account-field" for="account-phone">
+          <span>手机号</span>
+          <input id="account-phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="13800138000" />
+        </label>
+        <label class="account-field" for="account-password">
+          <span>密码</span>
+          <input id="account-password" type="password" autocomplete="current-password" placeholder="至少 6 位" />
+        </label>
+        <label class="account-field" for="account-sms-code">
+          <span>短信验证码</span>
+          <div class="account-code-row">
+            <input id="account-sms-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6 位验证码" />
+            <button class="secondary-button compact" type="button" data-action="request-sms-code">发送验证码</button>
+          </div>
         </label>
         <div class="account-modal-actions">
-          <button class="primary-button" type="button" data-action="confirm-account-login">登录并加载日程</button>
+          <button class="primary-button" type="button" data-action="confirm-account-login">注册/登录并加载日程</button>
           <button class="secondary-button" type="button" data-action="logout-account">退出登录</button>
         </div>
-        <p class="account-note">当前演示版会把日程保存在本机浏览器中；正式 Google / 微信 OAuth 可接入后端后替换。</p>
+        <p class="account-note">当前静态演示版会在本机生成验证码并保存账号；正式短信发送需要后端接口或云函数接入短信服务商。</p>
       </div>
     </div>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="./capacitor.js"></script>
-    <script type="module" src="./src/app.js?v=account-login-4"></script>
+    <script type="module" src="./src/app.js?v=phone-login-1"></script>
   </body>
 </html>

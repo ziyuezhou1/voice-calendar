@@ -12,12 +12,19 @@ import {
   weekRange,
 } from "./calendar-core.js?v=event-update-2";
 import {
-  ACCOUNT_PROVIDERS,
   createAccountSession,
+  createPhoneAccount,
+  createSmsVerification,
   getAccountEventsKey,
   getAccountLabel,
-  getProviderLabel,
-} from "./account-core.js?v=account-login-1";
+  getSmsVerificationRemainingSeconds,
+  isPhoneValid,
+  isSmsVerificationValid,
+  normalizePhone,
+  PHONE_ACCOUNT_PROVIDER,
+  validatePassword,
+  verifyPhoneAccountPassword,
+} from "./account-core.js?v=phone-login-1";
 import {
   getHolidayMarkers,
   getMonthHolidays,
@@ -36,6 +43,7 @@ import {
 const STORE_KEY = "voice-calendar-events-v1";
 const SETTINGS_KEY = "voice-calendar-settings-v1";
 const AUTH_SESSION_KEY = "voice-calendar-auth-session-v1";
+const PHONE_ACCOUNTS_KEY = "voice-calendar-phone-accounts-v1";
 const REMINDER_CHECK_INTERVAL_MS = 15000;
 const REMINDER_TOAST_DURATION_MS = 7000;
 
@@ -65,8 +73,10 @@ const elements = {
   accountAvatar: document.querySelector("#account-avatar"),
   accountModal: document.querySelector("#account-modal"),
   accountCloseButton: document.querySelector("[data-action='close-account-panel']"),
-  accountProviderButtons: document.querySelectorAll("[data-provider-option]"),
-  accountIdentity: document.querySelector("#account-identity"),
+  accountPhone: document.querySelector("#account-phone"),
+  accountPassword: document.querySelector("#account-password"),
+  accountSmsCode: document.querySelector("#account-sms-code"),
+  requestSmsCodeButton: document.querySelector("[data-action='request-sms-code']"),
   confirmAccountLoginButton: document.querySelector("[data-action='confirm-account-login']"),
   logoutAccountButton: document.querySelector("[data-action='logout-account']"),
   micButton: document.querySelector("[data-action='toggle-voice']"),
@@ -108,7 +118,6 @@ const examples = [
 ];
 
 let account = loadAccountSession();
-let selectedAccountProvider = account?.provider || "google";
 const ENABLE_NATIVE_SPEECH = new URLSearchParams(window.location.search).get("nativeSpeech") === "1";
 let events = loadEvents();
 let activeRange = dayRange(new Date(), "今天");
@@ -134,6 +143,7 @@ let toastTimer = null;
 let settings = loadSettings();
 let pendingAdd = null;
 let pendingDelete = null;
+let smsVerification = null;
 
 init();
 
@@ -158,16 +168,16 @@ function bindEvents() {
   elements.accountModal.addEventListener("click", (event) => {
     if (event.target === elements.accountModal) closeAccountPanel();
   });
-  elements.accountProviderButtons.forEach((button) => {
-    button.addEventListener("click", () => selectAccountProvider(button.dataset.providerOption));
-  });
+  elements.requestSmsCodeButton.addEventListener("click", requestAccountSmsCode);
   elements.confirmAccountLoginButton.addEventListener("click", confirmAccountLogin);
   elements.logoutAccountButton.addEventListener("click", logoutAccount);
-  elements.accountIdentity.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      confirmAccountLogin();
-    }
+  [elements.accountPhone, elements.accountPassword, elements.accountSmsCode].forEach((field) => {
+    field.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        confirmAccountLogin();
+      }
+    });
   });
   elements.micButton.addEventListener("click", toggleVoice);
   elements.runButton.addEventListener("click", () => handleCommand(elements.transcript.value));
@@ -204,38 +214,82 @@ function bindEvents() {
 }
 
 function openAccountPanel() {
-  selectAccountProvider(selectedAccountProvider);
-  elements.accountIdentity.value = account?.displayName || "";
+  elements.accountPhone.value = account?.accountId || "";
+  elements.accountPassword.value = "";
+  elements.accountSmsCode.value = "";
   elements.accountModal.hidden = false;
-  window.setTimeout(() => elements.accountIdentity.focus(), 0);
+  window.setTimeout(() => elements.accountPhone.focus(), 0);
 }
 
 function closeAccountPanel() {
   elements.accountModal.hidden = true;
 }
 
-function selectAccountProvider(provider) {
-  selectedAccountProvider = Object.prototype.hasOwnProperty.call(ACCOUNT_PROVIDERS, provider) ? provider : "google";
-  const providerConfig = ACCOUNT_PROVIDERS[selectedAccountProvider];
-  elements.accountIdentity.placeholder = providerConfig.placeholder;
-  elements.accountProviderButtons.forEach((button) => {
-    const active = button.dataset.providerOption === selectedAccountProvider;
-    button.classList.toggle("active", active);
-    button.setAttribute("aria-pressed", String(active));
-  });
-}
-
-function confirmAccountLogin() {
-  let nextAccount;
-  try {
-    nextAccount = createAccountSession(selectedAccountProvider, elements.accountIdentity.value);
-  } catch {
-    const message = `请输入${getProviderLabel(selectedAccountProvider)}账号标识。`;
+function requestAccountSmsCode() {
+  const phone = normalizePhone(elements.accountPhone.value);
+  if (!isPhoneValid(phone)) {
+    const message = "请输入有效手机号，例如 13800138000。";
     logAssistant(message, "warning");
     showToast(message);
+    elements.accountPhone.focus();
     return;
   }
 
+  smsVerification = createSmsVerification(phone);
+  const remainingMinutes = Math.ceil(getSmsVerificationRemainingSeconds(smsVerification) / 60);
+  const message = `演示模式验证码：${smsVerification.code}，${remainingMinutes} 分钟内有效。正式版需要由后端短信服务发送到 ${smsVerification.phone}。`;
+  logAssistant(message, "success");
+  showToast(`演示验证码：${smsVerification.code}`);
+  elements.accountSmsCode.focus();
+}
+
+function confirmAccountLogin() {
+  const phone = normalizePhone(elements.accountPhone.value);
+  const password = elements.accountPassword.value;
+  const smsCode = elements.accountSmsCode.value;
+
+  if (!isPhoneValid(phone)) {
+    const message = "请输入有效手机号，例如 13800138000。";
+    logAssistant(message, "warning");
+    showToast(message);
+    elements.accountPhone.focus();
+    return;
+  }
+
+  const passwordCheck = validatePassword(password);
+  if (!passwordCheck.valid) {
+    logAssistant(passwordCheck.message, "warning");
+    showToast(passwordCheck.message);
+    elements.accountPassword.focus();
+    return;
+  }
+
+  if (!isSmsVerificationValid(smsVerification, phone, smsCode)) {
+    const message = "验证码不正确或已过期，请重新获取短信验证码。";
+    logAssistant(message, "warning");
+    showToast(message);
+    elements.accountSmsCode.focus();
+    return;
+  }
+
+  const phoneAccounts = loadPhoneAccounts();
+  let phoneAccount = phoneAccounts[phone];
+
+  if (phoneAccount && !verifyPhoneAccountPassword(phoneAccount, password)) {
+    const message = "密码不正确，请重新输入。";
+    logAssistant(message, "warning");
+    showToast(message);
+    elements.accountPassword.focus();
+    return;
+  }
+
+  if (!phoneAccount) {
+    phoneAccount = createPhoneAccount(phone, password);
+    phoneAccounts[phone] = phoneAccount;
+    savePhoneAccounts(phoneAccounts);
+  }
+
+  const nextAccount = createAccountSession(phone);
   const previousAccount = account;
   const previousEvents = events;
   account = nextAccount;
@@ -247,6 +301,8 @@ function confirmAccountLogin() {
   if (!hasAccountEvents && events.length) saveEvents();
 
   pendingAdd = null;
+  smsVerification = null;
+  elements.accountSmsCode.value = "";
   activeRange = dayRange(new Date(), "今天");
   calendarCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
   updateAccountUI();
@@ -267,7 +323,7 @@ function logoutAccount() {
   saveEvents();
   clearAccountSession();
   account = null;
-  selectedAccountProvider = "google";
+  smsVerification = null;
   events = loadEvents();
   pendingAdd = null;
   activeRange = dayRange(new Date(), "今天");
@@ -283,9 +339,8 @@ function logoutAccount() {
 
 function updateAccountUI() {
   const label = getAccountLabel(account);
-  const provider = account ? ACCOUNT_PROVIDERS[account.provider] : null;
   elements.accountName.textContent = label;
-  elements.accountAvatar.textContent = provider?.avatar || "访";
+  elements.accountAvatar.textContent = account ? PHONE_ACCOUNT_PROVIDER.avatar : "访";
   elements.accountButton.title = account ? `当前账号：${label}` : "登录账号";
   elements.accountButton.setAttribute("aria-label", account ? `当前账号：${label}` : "登录账号");
   elements.logoutAccountButton.disabled = !account;
@@ -1565,10 +1620,27 @@ function loadAccountSession() {
   try {
     const session = JSON.parse(localStorage.getItem(AUTH_SESSION_KEY) || "null");
     if (!session?.provider || !session?.accountId || !session?.displayName) return null;
-    if (!Object.prototype.hasOwnProperty.call(ACCOUNT_PROVIDERS, session.provider)) return null;
+    if (session.provider !== PHONE_ACCOUNT_PROVIDER.provider) return null;
     return session;
   } catch {
     return null;
+  }
+}
+
+function loadPhoneAccounts() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PHONE_ACCOUNTS_KEY) || "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function savePhoneAccounts(records) {
+  try {
+    localStorage.setItem(PHONE_ACCOUNTS_KEY, JSON.stringify(records));
+  } catch {
+    logAssistant("浏览器暂时无法保存账号密码，本次登录可能无法在刷新后保留。", "warning");
   }
 }
 

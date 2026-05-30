@@ -1218,6 +1218,12 @@ body[data-listening="true"] .voice-meter span:nth-child(5) {
   background: var(--control);
 }
 
+.account-code-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
 .account-modal-actions {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -1296,6 +1302,10 @@ body[data-listening="true"] .voice-meter span:nth-child(5) {
 
   .command-actions {
     display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .account-code-row {
     grid-template-columns: 1fr;
   }
 
