@@ -58,6 +58,7 @@ const THEME_ALIASES = [
 ];
 
 const MAX_DELETE_CANDIDATES = 5;
+const MAX_UPDATE_CANDIDATES = 5;
 
 const elements = {
   accountButton: document.querySelector("[data-action='open-account-panel']"),
@@ -134,6 +135,7 @@ let toastTimer = null;
 let settings = loadSettings();
 let pendingAdd = null;
 let pendingDelete = null;
+let pendingUpdate = null;
 
 init();
 
@@ -247,6 +249,8 @@ function confirmAccountLogin() {
   if (!hasAccountEvents && events.length) saveEvents();
 
   pendingAdd = null;
+  pendingDelete = null;
+  pendingUpdate = null;
   activeRange = dayRange(new Date(), "今天");
   calendarCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
   updateAccountUI();
@@ -270,6 +274,8 @@ function logoutAccount() {
   selectedAccountProvider = "google";
   events = loadEvents();
   pendingAdd = null;
+  pendingDelete = null;
+  pendingUpdate = null;
   activeRange = dayRange(new Date(), "今天");
   calendarCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
   updateAccountUI();
@@ -850,6 +856,7 @@ function handleCommand(rawText) {
   }
 
   const theme = parseThemeCommand(text);
+  if (pendingUpdate && handlePendingUpdateReply(text, theme)) return;
   if (pendingDelete && handlePendingDeleteReply(text, theme)) return;
 
   if (pendingAdd) {
@@ -1053,7 +1060,7 @@ function handlePendingDeleteReply(text, theme) {
     return true;
   }
 
-  const selectedNumber = parseDeleteSelection(text);
+  const selectedNumber = parseCandidateSelection(text);
   if (selectedNumber !== null) {
     if (selectedNumber < 1 || selectedNumber > pendingDelete.matches.length) {
       const message = `我只列出了 ${pendingDelete.matches.length} 条候选日程，请说 1 到 ${pendingDelete.matches.length} 之间的序号，或说取消。`;
@@ -1075,7 +1082,7 @@ function handlePendingDeleteReply(text, theme) {
   }
 
   const command = parseVoiceCommand(text, { now: new Date() });
-  if (theme || command.intent === "add" || command.intent === "delete" || command.intent === "list") {
+  if (theme || command.intent === "add" || command.intent === "delete" || command.intent === "update" || command.intent === "list") {
     pendingDelete = null;
     logAssistant("已结束上一次待确认删除。", "info");
     return false;
@@ -1087,6 +1094,7 @@ function handlePendingDeleteReply(text, theme) {
 
 function startPendingDelete(matches, sourceText = "") {
   pendingAdd = null;
+  pendingUpdate = null;
   const candidates = matches.slice(0, MAX_DELETE_CANDIDATES);
   pendingDelete = { matches: candidates, total: matches.length, sourceText };
 
@@ -1098,10 +1106,10 @@ function startPendingDelete(matches, sourceText = "") {
 
 function getDeleteConfirmationMessage(candidates, total) {
   if (candidates.length === 1) {
-    return `我找到 1 条匹配日程：${formatDeleteCandidate(candidates[0])}。确认删除吗？可以说“确认删除”或“取消”。`;
+    return `我找到 1 条匹配日程：${formatEventCandidate(candidates[0])}。确认删除吗？可以说“确认删除”或“取消”。`;
   }
 
-  const list = candidates.map((event, index) => `${index + 1}. ${formatDeleteCandidate(event)}`).join("；");
+  const list = candidates.map((event, index) => `${index + 1}. ${formatEventCandidate(event)}`).join("；");
   const omitted = total > candidates.length ? `还有 ${total - candidates.length} 条未列出，我先展示最相关的 ${candidates.length} 条。` : "";
   return `我找到了 ${total} 条相似日程：${list}。${omitted}你要删除第几个？`;
 }
@@ -1167,7 +1175,108 @@ function handleUpdate(command) {
     return;
   }
 
-  const target = matches[0];
+  if (matches.length > 1) {
+    startPendingUpdate(matches, command);
+    return;
+  }
+
+  applyUpdateToEvent(matches[0], command);
+}
+
+function startPendingUpdate(matches, command) {
+  pendingAdd = null;
+  pendingDelete = null;
+  const candidates = matches.slice(0, MAX_UPDATE_CANDIDATES);
+  pendingUpdate = { matches: candidates, total: matches.length, command };
+
+  const message = getUpdateConfirmationMessage(candidates, matches.length);
+  elements.voiceStatus.textContent = "等待选择要修改的日程";
+  logAssistant(message, "warning");
+  speak(message);
+}
+
+function getUpdateConfirmationMessage(candidates, total) {
+  const list = candidates.map((event, index) => `${index + 1}. ${formatEventCandidate(event)}`).join("；");
+  const omitted = total > candidates.length ? `还有 ${total - candidates.length} 条未列出，我先展示最相关的 ${candidates.length} 条。` : "";
+  return `我找到了 ${total} 条相似日程：${list}。${omitted}你要修改第几个？`;
+}
+
+function handlePendingUpdateReply(text, theme) {
+  if (isPendingCancel(text) || isUpdateRejection(text)) {
+    cancelPendingUpdate();
+    return true;
+  }
+
+  const selectedNumber = parseCandidateSelection(text);
+  if (selectedNumber !== null) {
+    if (selectedNumber < 1 || selectedNumber > pendingUpdate.matches.length) {
+      const message = `我只列出了 ${pendingUpdate.matches.length} 条候选日程，请说 1 到 ${pendingUpdate.matches.length} 之间的序号，或说取消。`;
+      logAssistant(message, "warning");
+      speak(message);
+      return true;
+    }
+    confirmPendingUpdate(selectedNumber - 1);
+    return true;
+  }
+
+  if (isUpdateConfirmation(text)) {
+    askPendingUpdateSelection();
+    return true;
+  }
+
+  const command = parseVoiceCommand(text, { now: new Date() });
+  if (theme || command.intent === "add" || command.intent === "delete" || command.intent === "update" || command.intent === "list") {
+    pendingUpdate = null;
+    logAssistant("已结束上一次待确认修改。", "info");
+    return false;
+  }
+
+  askPendingUpdateSelection();
+  return true;
+}
+
+function confirmPendingUpdate(index) {
+  const target = pendingUpdate?.matches[index];
+  const command = pendingUpdate?.command;
+  const total = pendingUpdate?.total || 0;
+  pendingUpdate = null;
+
+  if (!target || !command || !events.some((event) => event.id === target.id)) {
+    const message = "这条待修改日程已经不存在，我没有继续修改。";
+    logAssistant(message, "warning");
+    speak(message);
+    render();
+    return;
+  }
+
+  applyUpdateToEvent(target, command, total);
+}
+
+function cancelPendingUpdate() {
+  pendingUpdate = null;
+  const message = "好的，已取消修改。";
+  elements.voiceStatus.textContent = "待命中";
+  logAssistant(message, "info");
+  speak(message);
+}
+
+function askPendingUpdateSelection() {
+  const message = `请说要修改第几个，例如“第 1 个”，或说“取消”。`;
+  logAssistant(message, "warning");
+  speak(message);
+}
+
+function isUpdateConfirmation(text) {
+  const normalized = normalizeCommand(text).replace(/\s+/g, "");
+  return /^(确认|确认修改|确定|确定修改|是|对|好|好的|可以|修改|改吧|修改吧)$/.test(normalized);
+}
+
+function isUpdateRejection(text) {
+  const normalized = normalizeCommand(text).replace(/\s+/g, "");
+  return /^(不改|别改|不要改|先不改|否|不是)$/.test(normalized);
+}
+
+function applyUpdateToEvent(target, command, matchCount = 1) {
   const updated = updateEventFromCommand(target, command);
   events = events.map((event) => (event.id === target.id ? updated : event));
   saveEvents();
@@ -1175,14 +1284,14 @@ function handleUpdate(command) {
   calendarCursor = new Date(new Date(updated.startsAt).getFullYear(), new Date(updated.startsAt).getMonth(), 1);
   render();
 
-  const extra = matches.length > 1 ? `另外还有 ${matches.length - 1} 条相似日程未修改。` : "";
+  const extra = matchCount > 1 ? `另外还有 ${matchCount - 1} 条相似日程未修改。` : "";
   const message = `已修改：${updated.title}，${formatDateTime(updated.startsAt)}，${formatReminderText(updated.reminderMinutes, { includeVerb: true })}。${extra}`;
   logAssistant(message, "success");
   showToast(message);
   speak(message);
 }
 
-function formatDeleteCandidate(event) {
+function formatEventCandidate(event) {
   return `${formatDateTime(event.startsAt)} ${event.title}`;
 }
 
@@ -1196,7 +1305,7 @@ function isDeleteRejection(text) {
   return /^(不删|别删|不要删|先不删|否|不是)$/.test(normalized);
 }
 
-function parseDeleteSelection(text) {
+function parseCandidateSelection(text) {
   const normalized = normalizeCommand(text).replace(/\s+/g, "");
   let token = null;
 
@@ -1205,7 +1314,7 @@ function parseDeleteSelection(text) {
   } else {
     token =
       normalized.match(/第(\d+|[一二两三四五六七八九十]+)(?:个|条|项)?/)?.[1] ||
-      normalized.match(/(?:删除|删掉|选|选择|确认删除)(?:第)?(\d+|[一二两三四五六七八九十]+)(?:个|条|项)?/)?.[1] ||
+      normalized.match(/(?:删除|删掉|修改|改|选|选择|确认删除|确认修改)(?:第)?(\d+|[一二两三四五六七八九十]+)(?:个|条|项)?/)?.[1] ||
       null;
   }
 
