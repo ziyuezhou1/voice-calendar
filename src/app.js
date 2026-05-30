@@ -10,7 +10,14 @@ import {
   parseVoiceCommand,
   weekRange,
 } from "./calendar-core.js?v=delete-confirm-1";
-import { getHoliday, getMonthHolidays, hasHolidayData, HOLIDAY_SOURCE } from "./holiday-data.js";
+import {
+  getHolidayMarkers,
+  getMonthHolidays,
+  hasHolidayData,
+  hasStatutoryHolidayData,
+  HOLIDAY_SOURCE,
+  INTERNATIONAL_HOLIDAY_SOURCE,
+} from "./holiday-data.js?v=international-holidays-1";
 import {
   getSpeechAdapterErrorMessage,
   hasNativeSpeechRecognition,
@@ -1199,17 +1206,19 @@ function renderCalendar() {
     ${["一", "二", "三", "四", "五", "六", "日"].map((day) => `<span class="weekday">${day}</span>`).join("")}
     ${days.map((day) => {
       const key = formatDateKey(day);
-      const holiday = getHoliday(key);
+      const holidayMarkers = getHolidayMarkers(key);
+      const primaryHoliday = holidayMarkers[0];
       const outside = day.getMonth() !== displayMonth;
       const isToday = key === formatDateKey(today);
       const isActive = activeRange?.type === "day" && key === formatDateKey(activeRange.start);
       const count = eventCounts[key] || 0;
-      const holidayClass = holiday ? ` ${holiday.type}` : "";
-      const holidayPrefix = holiday?.type === "holiday" ? "休" : "班";
+      const holidayClass = holidayMarkers.map((holiday) => ` ${holiday.type}`).join("");
+      const holidayPrefix = getHolidayPrefix(primaryHoliday);
+      const holidayLabel = holidayMarkers.map((holiday) => holiday.name).join("、");
       return `
-        <button class="calendar-day ${outside ? "outside" : ""} ${isToday ? "today" : ""} ${isActive ? "active" : ""}${holidayClass}" type="button" data-date="${key}" aria-label="${key}，${count} 条日程${holiday ? `，${holiday.name}` : ""}">
+        <button class="calendar-day ${outside ? "outside" : ""} ${isToday ? "today" : ""} ${isActive ? "active" : ""}${holidayClass}" type="button" data-date="${key}" aria-label="${key}，${count} 条日程${holidayLabel ? `，${holidayLabel}` : ""}">
           <span class="day-number">${day.getDate()}</span>
-          ${holiday ? `<strong class="holiday-badge">${holidayPrefix}</strong><small>${escapeHtml(holiday.name)}</small>` : ""}
+          ${primaryHoliday ? `<strong class="holiday-badge ${primaryHoliday.type}">${holidayPrefix}</strong><small>${escapeHtml(holidayLabel)}</small>` : ""}
           ${count ? `<em>${count}</em>` : ""}
         </button>
       `;
@@ -1222,8 +1231,20 @@ function renderCalendar() {
   }
 
   elements.monthHolidays.innerHTML = monthHolidays.length
-    ? `<ul>${monthHolidays.map((holiday) => `<li class="${holiday.type}"><span>${holiday.dateKey.slice(5)}</span>${holiday.name}</li>`).join("")}</ul><p>来源：${HOLIDAY_SOURCE.title}</p>`
-    : `<p>${displayYear}年${displayMonth + 1}月无法定节假日或调休上班日。</p>`;
+    ? `<ul>${monthHolidays.map((holiday) => `<li class="${holiday.type}"><span>${holiday.dateKey.slice(5)}</span>${holiday.name}</li>`).join("")}</ul><p>${getHolidaySourceText(displayYear)}</p>`
+    : `<p>${displayYear}年${displayMonth + 1}月无法定节假日、调休上班日或国际节日。</p>`;
+}
+
+function getHolidayPrefix(holiday) {
+  if (!holiday) return "";
+  if (holiday.type === "holiday") return "休";
+  if (holiday.type === "workday") return "班";
+  return "节";
+}
+
+function getHolidaySourceText(year) {
+  const statutory = hasStatutoryHolidayData(year) ? `中国法定节假日：${HOLIDAY_SOURCE.title}` : `${year} 年中国法定节假日暂未录入`;
+  return `${statutory}；国际节日：${INTERNATIONAL_HOLIDAY_SOURCE.title}`;
 }
 
 function renderExamples() {
