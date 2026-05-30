@@ -16,6 +16,7 @@
 | 10 | feat: 增加日程修改命令 | 解析“改到/提前到/改提醒”等命令并更新匹配日程 | 输入“把明天下午三点的团队周会改到四点” |
 | 11 | feat: 增加删除前确认 | 删除命令先展示候选，确认或选择序号后再删除 | 输入“取消明天开会”，再输入“第 1 个”或“确认删除” |
 | 12 | feat: 增加 Android 原生语音识别 App | Capacitor Android 工程、语音 adapter、GitHub Release workflow | `npm test`、`npm run cap:sync`、GitHub Actions 构建 APK |
-| 13 | docs: 补充依赖和原创说明 | `README.md`、PR 模板 | 检查 README 与 PR 描述完整性 |
+| 13 | docs: 增加用户调研与设计说明 | `docs/user-research.md`、README 入口 | 检查用户画像和需求功能映射完整性 |
+| 14 | docs: 补充依赖和原创说明 | `README.md`、PR 模板 | 检查 README 与 PR 描述完整性 |
 
 注意：不要伪造历史提交时间。所有 commit 应在参赛批次开始与截止时间之间自然产生。
