@@ -262,7 +262,16 @@ function parseReminder(text, options = {}) {
 
 function buildDateTime(text, baseDate, options = {}) {
   const relativeTime = parseRelativeTime(text, baseDate);
-  if (relativeTime) return { startsAt: relativeTime.date, tokens: relativeTime.tokens, precision: relativeTime.precision, hasDate: true, hasTime: true };
+  if (relativeTime) {
+    return {
+      startsAt: relativeTime.date,
+      tokens: relativeTime.tokens,
+      precision: relativeTime.precision,
+      hasDate: true,
+      hasTime: true,
+      isRelativeTime: true,
+    };
+  }
 
   const datePart = parseDatePart(text, baseDate);
   const clock = parseClockTime(text);
@@ -475,7 +484,7 @@ export function parseVoiceCommand(input, options = {}) {
 
   if (intent === "add") {
     const dateTime = buildDateTime(text, now);
-    const reminder = parseReminder(text);
+    const reminder = parseReminder(text, { defaultReminderMinutes: dateTime.isRelativeTime ? 0 : 10 });
     const title = extractTitle(text, [...dateTime.tokens, ...reminder.tokens]);
     const missing = [];
     if (!dateTime.startsAt) missing.push("dateTime");
@@ -583,10 +592,14 @@ export function findMatchingEvents(events, command) {
       let score = 0;
       const eventDate = new Date(event.startsAt);
       const eventTitle = compact(event.title);
+      const target = command.startsAt ? new Date(command.startsAt) : null;
+
+      if (target && command.hasDate && formatDateKey(eventDate) !== formatDateKey(target)) {
+        return { event, score: 0 };
+      }
 
       if (normalizedTitle && (eventTitle.includes(normalizedTitle) || normalizedTitle.includes(eventTitle))) score += 4;
-      if (command.startsAt) {
-        const target = new Date(command.startsAt);
+      if (target) {
         if (formatDateKey(eventDate) === formatDateKey(target)) score += 3;
         const minuteDiff = Math.abs(eventDate.getTime() - target.getTime()) / 60000;
         if (minuteDiff <= 10) score += 4;

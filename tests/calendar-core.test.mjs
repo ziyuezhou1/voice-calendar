@@ -71,6 +71,23 @@ function parse(text) {
   assert.equal(command.intent, "add");
   assert.equal(command.title, "喝水");
   assert.equal(formatDateTime(command.startsAt), "2026-05-29 09:50");
+  assert.equal(command.reminderMinutes, 0);
+}
+
+{
+  const command = parse("1分钟后提醒喝水");
+  assert.equal(command.intent, "add");
+  assert.equal(command.title, "喝水");
+  assert.equal(formatDateTime(command.startsAt), "2026-05-29 09:21");
+  assert.equal(command.reminderMinutes, 0);
+}
+
+{
+  const command = parse("1分钟后提醒喝水，提前1分钟提醒我");
+  assert.equal(command.intent, "add");
+  assert.equal(command.title, "喝水");
+  assert.equal(formatDateTime(command.startsAt), "2026-05-29 09:21");
+  assert.equal(command.reminderMinutes, 1);
 }
 
 {
@@ -132,6 +149,18 @@ function parse(text) {
   assert.equal(updated.title, "喝水");
   assert.equal(formatDateTime(updated.startsAt), "2026-05-29 09:50");
   assert.equal(updated.reminderMinutes, 10);
+}
+
+{
+  const events = [
+    createEventFromCommand(parse("添加明天上午十点团队周会"), now),
+    createEventFromCommand(parse("添加明天下午三点产品评审"), now),
+    createEventFromCommand(parse("添加后天下午三点开会"), now),
+  ];
+  const matches = findMatchingEvents(events, parse("取消明天开会"));
+  assert.equal(matches.length, 2);
+  assert.equal(matches[0].title, "团队周会");
+  assert.equal(matches[1].title, "产品评审");
 }
 
 {
