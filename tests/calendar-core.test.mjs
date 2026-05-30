@@ -121,6 +121,18 @@ function parse(text) {
 
 {
   const events = [
+    createEventFromCommand(parse("添加明天上午十点团队周会"), now),
+    createEventFromCommand(parse("添加明天下午三点产品评审"), now),
+    createEventFromCommand(parse("添加后天下午三点开会"), now),
+  ];
+  const matches = findMatchingEvents(events, parse("取消明天开会"));
+  assert.equal(matches.length, 2);
+  assert.equal(matches[0].title, "团队周会");
+  assert.equal(matches[1].title, "产品评审");
+}
+
+{
+  const events = [
     createEventFromCommand(parse("添加今天上午十点晨会"), now),
     createEventFromCommand(parse("添加下周五上午十点评审"), now),
   ];
